@@ -6,9 +6,11 @@ from PySide6.QtWidgets import (
     QLabel, QGroupBox, QSplitter, QMessageBox,
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction
 
 from src.db.queries import (
     get_all_tracks, add_transition, get_transitions_for_track,
+    delete_transition, update_transition,
 )
 
 TRANSITION_COLUMNS = ["Direction", "Track", "BPM", "Key", "Rating", "Notes"]
@@ -44,9 +46,9 @@ class TransitionsTab(QWidget):
         form_layout.addRow("To:", self._to_combo)
 
         self._rating = QSpinBox()
-        self._rating.setRange(1, 5)
-        self._rating.setValue(3)
-        form_layout.addRow("Rating (1–5):", self._rating)
+        self._rating.setRange(1, 3)
+        self._rating.setValue(2)
+        form_layout.addRow("Rating (1–3):", self._rating)
 
         self._notes = QTextEdit()
         self._notes.setMaximumHeight(60)
@@ -66,12 +68,17 @@ class TransitionsTab(QWidget):
         self._table = QTableWidget()
         self._table.setColumnCount(len(TRANSITION_COLUMNS))
         self._table.setHorizontalHeaderLabels(TRANSITION_COLUMNS)
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked)
+        self._table.cellChanged.connect(self._on_transition_edited)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setAlternatingRowColors(True)
         self._table.verticalHeader().setVisible(False)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
+        delete_action = QAction("Delete transition", self._table)
+        delete_action.triggered.connect(self._delete_selected_transition)
+        self._table.addAction(delete_action)
         view_layout.addWidget(self._table)
 
         splitter.addWidget(view_box)
@@ -105,8 +112,10 @@ class TransitionsTab(QWidget):
 
     def _refresh_transitions_table(self) -> None:
         track_id = self._from_combo.currentData()
+        self._table.blockSignals(True)
         if not track_id:
             self._table.setRowCount(0)
+            self._table.blockSignals(False)
             return
 
         data = get_transitions_for_track(self._conn, track_id)
@@ -126,6 +135,10 @@ class TransitionsTab(QWidget):
             for col, val in enumerate(values):
                 item = QTableWidgetItem(val)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+                if col == 0:
+                    item.setData(Qt.ItemDataRole.UserRole, row["id"])
+                if col not in (4, 5):
+                    item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
                 self._table.setItem(r, col, item)
 
         for row in data["outgoing"]:
@@ -136,6 +149,33 @@ class TransitionsTab(QWidget):
         self._table.resizeColumnsToContents()
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self._table.blockSignals(False)
+
+    def _on_transition_edited(self, row: int, col: int) -> None:
+        if col not in (4, 5):
+            return
+        id_item = self._table.item(row, 0)
+        if id_item is None:
+            return
+        transition_id = id_item.data(Qt.ItemDataRole.UserRole)
+        if transition_id is None:
+            return
+
+        rating_item = self._table.item(row, 4)
+        notes_item = self._table.item(row, 5)
+
+        try:
+            rating = max(1, min(3, int(rating_item.text())))
+        except (ValueError, AttributeError):
+            rating = 1
+
+        notes = notes_item.text() if notes_item else ""
+
+        self._table.blockSignals(True)
+        rating_item.setText(str(rating))
+        self._table.blockSignals(False)
+
+        update_transition(self._conn, transition_id, rating, notes)
 
     def _save_transition(self) -> None:
         from_id = self._from_combo.currentData()
@@ -157,6 +197,22 @@ class TransitionsTab(QWidget):
         )
         self._notes.clear()
         self._refresh_transitions_table()
+
+    def _delete_selected_transition(self) -> None:
+        row = self._table.currentRow()
+        if row < 0:
+            return
+        transition_id = self._table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        if transition_id is None:
+            return
+        confirm = QMessageBox.question(
+            self, "Delete transition",
+            "Delete this transition?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if confirm == QMessageBox.StandardButton.Yes:
+            delete_transition(self._conn, transition_id)
+            self._refresh_transitions_table()
 
     def set_from_track(self, track_id: str) -> None:
         idx = self._from_combo.findData(track_id)

@@ -38,7 +38,7 @@ def _create_tables(conn: sqlite3.Connection) -> None:
             id         INTEGER PRIMARY KEY,
             from_track TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
             to_track   TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
-            rating     INTEGER CHECK (rating BETWEEN 1 AND 5),
+            rating     INTEGER CHECK (rating BETWEEN 1 AND 3),
             notes      TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );

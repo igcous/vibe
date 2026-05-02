@@ -157,6 +157,19 @@ def delete_tag(conn: sqlite3.Connection, tag_name: str) -> None:
     conn.commit()
 
 
+def delete_transition(conn: sqlite3.Connection, transition_id: int) -> None:
+    conn.execute("DELETE FROM transitions WHERE id = ?", (transition_id,))
+    conn.commit()
+
+
+def update_transition(conn: sqlite3.Connection, transition_id: int, rating: int, notes: str) -> None:
+    conn.execute(
+        "UPDATE transitions SET rating = ?, notes = ? WHERE id = ?",
+        (rating, notes, transition_id),
+    )
+    conn.commit()
+
+
 def add_transition(
     conn: sqlite3.Connection,
     from_id: str,
