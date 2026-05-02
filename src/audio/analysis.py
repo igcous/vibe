@@ -70,6 +70,10 @@ def to_open_key(key: str, scale: str) -> str | None:
     return OPEN_KEY_MAP.get((key, scale))
 
 
+def _clean_artifact(s: str) -> str:
+    return s.replace("(esmp3.cc)", "").strip()
+
+
 def read_metadata(path: str) -> dict:
     title = None
     artist = None
@@ -82,7 +86,31 @@ def read_metadata(path: str) -> dict:
     except (ID3NoHeaderError, Exception):
         pass
 
-    if not title:
-        title = os.path.splitext(os.path.basename(path))[0]
+    if not title or not artist:
+        basename = os.path.splitext(os.path.basename(path))[0]
+        cleaned = _clean_artifact(basename)
+
+        if " - " in cleaned:
+            left, _, right = cleaned.partition(" - ")
+            parsed_artist = left.strip() or None
+            parsed_title = right.strip() or None
+
+            if not artist:
+                artist = parsed_artist
+            if not title:
+                title = parsed_title
+
+        if not title:
+            title = cleaned or basename
+
+    # Strip "Artist - " prefix that got embedded in the title
+    if title and artist:
+        prefix = artist + " - "
+        if title.startswith(prefix):
+            title = title[len(prefix):]
+    if title:
+        title = _clean_artifact(title)
 
     return {"title": title, "artist": artist}
+
+

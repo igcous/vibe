@@ -2,7 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(.venv/bin/python *)",
-      "Bash(fpcalc \"tracks/Beat Dancer \\(esmp3.cc\\).MP3\")"
+      "Bash(sqlite3 *)"
     ]
   }
 }
