@@ -109,6 +109,22 @@ def mark_all_unavailable(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def track_exists_analyzed(conn: sqlite3.Connection, track_id: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM tracks WHERE id = ? AND bpm IS NOT NULL AND key_open IS NOT NULL",
+        (track_id,),
+    ).fetchone()
+    return row is not None
+
+
+def touch_track(conn: sqlite3.Connection, track_id: str, path: str) -> None:
+    conn.execute(
+        "UPDATE tracks SET path = ?, is_available = 1, last_seen = ? WHERE id = ?",
+        (path, datetime.now().isoformat(), track_id),
+    )
+    conn.commit()
+
+
 def get_or_create_tag(conn: sqlite3.Connection, name: str) -> int:
     name = name.strip().lower()
     row = conn.execute("SELECT id FROM tags WHERE name = ?", (name,)).fetchone()
@@ -134,6 +150,11 @@ def untag_track(conn: sqlite3.Connection, track_id: str, tag_name: str) -> None:
         "DELETE FROM track_tags WHERE track_id = ? AND tag_id = ?",
         (track_id, tag_id),
     )
+    still_used = conn.execute(
+        "SELECT 1 FROM track_tags WHERE tag_id = ?", (tag_id,)
+    ).fetchone()
+    if still_used is None:
+        conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
     conn.commit()
 
 

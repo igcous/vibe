@@ -30,7 +30,7 @@ def run_ui() -> None:
     conn = init_db(DB_PATH)
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    window = MainWindow(conn)
+    window = MainWindow(conn, DB_PATH)
     window.show()
     sys.exit(app.exec())
 

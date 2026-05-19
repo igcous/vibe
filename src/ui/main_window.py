@@ -1,13 +1,14 @@
 import sqlite3
 from PySide6.QtWidgets import QMainWindow, QTabWidget, QStatusBar
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 from src.ui.library_tab import LibraryTab
 from src.ui.transitions_tab import TransitionsTab
+from src.ui.options_tab import OptionsTab
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: sqlite3.Connection, db_path: str):
         super().__init__()
         self._conn = conn
         self.setWindowTitle("DJ Transition Companion")
@@ -18,15 +19,25 @@ class MainWindow(QMainWindow):
 
         self._library = LibraryTab(conn)
         self._transitions = TransitionsTab(conn)
+        self._options = OptionsTab(db_path)
 
         self._tabs.addTab(self._library, "Library")
         self._tabs.addTab(self._transitions, "Transitions")
+        self._tabs.addTab(self._options, "Options")
 
         self._library.track_selected.connect(self._on_track_selected)
         self._tabs.currentChanged.connect(self._on_tab_changed)
+        self._options.scan_finished.connect(self._on_scan_finished)
 
         self._status = QStatusBar()
         self.setStatusBar(self._status)
+        self._update_status()
+
+        QTimer.singleShot(0, self._options.trigger_auto_scan)
+
+    def _on_scan_finished(self) -> None:
+        self._library.refresh()
+        self._library._rebuild_tag_filter()
         self._update_status()
 
     def _on_track_selected(self, track_id: str, display_name: str) -> None:

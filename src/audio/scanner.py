@@ -4,9 +4,9 @@ from datetime import datetime
 from typing import Callable
 
 from src.db.schema import init_db
-from src.db.queries import upsert_track, mark_all_unavailable, get_all_tracks
+from src.db.queries import upsert_track, mark_all_unavailable, get_all_tracks, track_exists_analyzed, touch_track
 from src.audio.fingerprint import fingerprint
-from src.audio.analysis import detect_bpm, detect_key, to_open_key, read_metadata
+from src.audio.analysis import analyze_audio, read_metadata
 
 
 def scan_folder(
@@ -44,24 +44,18 @@ def _process_file(conn: sqlite3.Connection, path: str) -> None:
     if not fp:
         return
 
-    metadata = read_metadata(path)
-    bpm = detect_bpm(path)
+    if track_exists_analyzed(conn, fp):
+        touch_track(conn, fp, path)
+        return
 
-    key_open = None
-    key_strength = None
-    key_result = detect_key(path)
-    if key_result:
-        key, scale, strength = key_result
-        key_open = to_open_key(key, scale)
-        key_strength = strength
+    metadata = read_metadata(path)
+    analysis = analyze_audio(path)
 
     upsert_track(conn, {
         "id": fp,
         "path": path,
         "title": metadata["title"],
         "artist": metadata["artist"],
-        "bpm": bpm,
-        "key_open": key_open,
-        "key_strength": key_strength,
+        **analysis,
         "last_seen": datetime.now().isoformat(),
     })
