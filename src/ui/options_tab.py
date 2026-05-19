@@ -3,9 +3,8 @@ import os
 import threading
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QCheckBox, QFileDialog, QProgressBar, QGroupBox,
-    QDoubleSpinBox,
 )
 from PySide6.QtCore import Qt, Signal, QObject
 
@@ -33,18 +32,8 @@ class _ScanSignals(QObject):
     error = Signal(str)
 
 
-_WEIGHT_LABELS = [
-    ("key",  "Key compatibility"),
-    ("bpm",  "BPM match"),
-    ("tags", "Tag similarity"),
-    ("user", "User transitions"),
-]
-_DEFAULT_WEIGHTS = {"key": 0.45, "bpm": 0.25, "tags": 0.15, "user": 0.15}
-
-
 class OptionsTab(QWidget):
     scan_finished = Signal()
-    weights_changed = Signal()
 
     def __init__(self, db_path: str):
         super().__init__()
@@ -52,7 +41,6 @@ class OptionsTab(QWidget):
         self._settings = load_settings()
         self._scanning = False
         self._signals: _ScanSignals | None = None
-        self._weight_inputs: dict[str, QDoubleSpinBox] = {}
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -94,38 +82,7 @@ class OptionsTab(QWidget):
         group_layout.addWidget(self._status_label)
 
         layout.addWidget(group)
-        layout.addWidget(self._build_weights_group())
         layout.addStretch()
-
-    def _build_weights_group(self) -> QGroupBox:
-        group = QGroupBox("Graph Weights")
-        form = QFormLayout(group)
-        form.setSpacing(8)
-        saved = self._settings.get("graph_weights", _DEFAULT_WEIGHTS)
-        for key, label in _WEIGHT_LABELS:
-            spin = QDoubleSpinBox()
-            spin.setRange(0.0, 1.0)
-            spin.setSingleStep(0.05)
-            spin.setDecimals(2)
-            spin.setValue(saved.get(key, _DEFAULT_WEIGHTS[key]))
-            spin.valueChanged.connect(self._on_weight_changed)
-            form.addRow(label + ":", spin)
-            self._weight_inputs[key] = spin
-        self._weight_sum_label = QLabel(self._weight_sum_text())
-        self._weight_sum_label.setStyleSheet("color: #888;")
-        form.addRow("", self._weight_sum_label)
-        return group
-
-    def _weight_sum_text(self) -> str:
-        total = sum(s.value() for s in self._weight_inputs.values()) if self._weight_inputs else 1.0
-        return f"Sum: {total:.2f}  (aim for 1.00)"
-
-    def _on_weight_changed(self) -> None:
-        weights = {k: round(s.value(), 2) for k, s in self._weight_inputs.items()}
-        self._weight_sum_label.setText(self._weight_sum_text())
-        self._settings["graph_weights"] = weights
-        save_settings(self._settings)
-        self.weights_changed.emit()
 
     def _on_browse(self) -> None:
         start = self._folder_input.text() or os.path.expanduser("~")

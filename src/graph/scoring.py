@@ -1,6 +1,8 @@
 import math
 
-DEFAULT_WEIGHTS = {"key": 0.45, "bpm": 0.25, "tags": 0.15, "user": 0.15}
+DEFAULT_WEIGHTS = {"key": 0.5, "bpm": 0.3, "tags": 0.2}
+
+_RATING_MULTIPLIERS = {3: None, 2: 1.2, 1: 1.1}  # None means force 1.0
 
 
 def key_score(key_a: str | None, key_b: str | None) -> float:
@@ -50,19 +52,25 @@ def transition_score(
     track_b: dict,
     user_rating: int | None,
     weights: dict[str, float],
+    include_user_ratings: bool = False,
 ) -> tuple[float, str, dict[str, float]]:
     """Returns (total_score 0-1, dominant_component, raw_component_scores)."""
     k = key_score(track_a.get("key_open"), track_b.get("key_open"))
     b = bpm_score(track_a.get("bpm"), track_b.get("bpm"))
     t = tag_score(track_a.get("tags", []), track_b.get("tags", []))
-    u = (user_rating / 3.0) if user_rating is not None else 0.0
 
     wk = weights.get("key", DEFAULT_WEIGHTS["key"])
     wb = weights.get("bpm", DEFAULT_WEIGHTS["bpm"])
     wt = weights.get("tags", DEFAULT_WEIGHTS["tags"])
-    wu = weights.get("user", DEFAULT_WEIGHTS["user"])
 
-    weighted = {"key": wk * k, "bpm": wb * b, "tags": wt * t, "user": wu * u}
-    score = sum(weighted.values())
+    weighted = {"key": wk * k, "bpm": wb * b, "tags": wt * t}
+    base_score = sum(weighted.values())
     dominant = max(weighted, key=weighted.__getitem__)
-    return score, dominant, {"key": k, "bpm": b, "tags": t, "user": u}
+
+    if include_user_ratings and user_rating is not None:
+        mult = _RATING_MULTIPLIERS.get(user_rating)
+        score = 1.0 if mult is None else min(1.0, base_score * mult)
+    else:
+        score = base_score
+
+    return score, dominant, {"key": k, "bpm": b, "tags": t}
