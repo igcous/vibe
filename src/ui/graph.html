@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #1e1e2e; overflow: hidden; }
+    #graph { width: 100vw; height: 100vh; }
+
+    #tooltip {
+      position: fixed; display: none; pointer-events: none; z-index: 100;
+      background: rgba(17,17,27,0.97); border: 1px solid #45475a;
+      border-radius: 8px; padding: 10px 14px;
+      font: 12px/1.7 'Segoe UI', system-ui, sans-serif; color: #cdd6f4;
+      max-width: 260px; box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    }
+    .tip-title  { font-weight: 600; color: #cba6f7; margin-bottom: 2px; }
+    .tip-score  { font-weight: 600; color: #a6e3a1; margin-bottom: 6px; }
+    .tip-row    { display: flex; justify-content: space-between; gap: 12px;
+                  font-size: 11px; margin-bottom: 1px; }
+    .tip-bar    { display: inline-block; height: 4px; border-radius: 2px;
+                  vertical-align: middle; margin-left: 4px; }
+
+    #status {
+      position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+      color: #45475a; font: 11px system-ui; pointer-events: none;
+    }
+    #error {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      color: #f38ba8; font: 14px system-ui; text-align: center; display: none;
+    }
+    #loading {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      color: #585b70; font: 13px system-ui;
+    }
+  </style>
+</head>
+<body>
+
+<div id="graph"></div>
+<div id="tooltip"></div>
+<div id="status"></div>
+<div id="error">Could not load graph library.<br>An internet connection is required on first use.</div>
+<div id="loading">Loading graph…</div>
+
+<!-- Qt WebChannel bridge -->
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+
+<script src="force-graph.min.js"></script>
+
+<script>
+document.getElementById('loading').style.display = 'none';
+
+if (typeof ForceGraph === 'undefined') {
+  document.getElementById('error').style.display = 'block';
+} else {
+
+  // ── Palette ──────────────────────────────────────────────────────────────
+  const EDGE_COLORS = {
+    key:  '#cba6f7',   // purple  – harmonic
+    bpm:  '#89b4fa',   // blue    – tempo
+    tags: '#a6e3a1',   // green   – vibe
+    user: '#f9e2af',   // gold    – user-defined
+  };
+
+  // One colour per Open Key number (1–12)
+  const KEY_PALETTE = [
+    '#585b70',   // 0 – fallback / no key
+    '#ff6b6b', '#ff9f43', '#ffd43b', '#a9e34b',
+    '#40c057',  '#20c997', '#15aabf', '#4dabf7',
+    '#748ffc',  '#cc5de8', '#f783ac', '#ff6b9f',
+  ];
+
+  function keyColor(keyStr) {
+    if (!keyStr) return KEY_PALETTE[0];
+    const n = parseInt(keyStr);
+    return (isNaN(n) || n < 1 || n > 12) ? KEY_PALETTE[0] : KEY_PALETTE[n];
+  }
+
+  function esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── State ─────────────────────────────────────────────────────────────────
+  let hoveredNode  = null;
+  let focusedNode  = null;
+  let currentZoom  = 1;
+  let graphData    = { nodes: [], links: [] };
+
+  // ── Graph setup ───────────────────────────────────────────────────────────
+  const Graph = ForceGraph()(document.getElementById('graph'))
+    .backgroundColor('#1e1e2e')
+    .nodeId('id')
+    .linkSource('source')
+    .linkTarget('target')
+
+    // ── Node rendering ──────────────────────────────────────────────────────
+    .nodeCanvasObject((node, ctx, scale) => {
+      const label = node.label || '';
+      const fs = Math.max(8, 11 / scale);
+      ctx.font = `${fs}px "Segoe UI", system-ui, sans-serif`;
+      const tw = ctx.measureText(label).width;
+      const px = 10 / scale, py = 5 / scale;
+      const w = tw + px * 2, h = fs + py * 2;
+      node.__w = w; node.__h = h;
+
+      const hov = hoveredNode === node;
+      const foc = focusedNode === node;
+      const isConnected = focusedNode && graphData.links.some(l => {
+        const ls = l.source?.id ?? l.source, lt = l.target?.id ?? l.target;
+        return (ls === focusedNode.id && lt === node.id) ||
+               (lt === focusedNode.id && ls === node.id);
+      });
+      const dim = focusedNode && !foc && !isConnected;
+
+      ctx.globalAlpha = dim ? 0.3 : 1.0;
+      roundRect(ctx, node.x - w/2, node.y - h/2, w, h, 3 / scale);
+      ctx.fillStyle = foc ? '#45475a' : hov ? '#313244' : '#181825';
+      ctx.fill();
+      ctx.strokeStyle = foc ? '#f9e2af' : hov ? '#cba6f7' : keyColor(node.key);
+      ctx.lineWidth = (foc ? 2.5 : hov ? 2 : 1.5) / scale;
+      ctx.stroke();
+
+      ctx.fillStyle = (foc || hov) ? '#cdd6f4' : '#a6adc8';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, node.x, node.y);
+      ctx.globalAlpha = 1.0;
+    })
+    .nodePointerAreaPaint((node, color, ctx, scale) => {
+      const w = node.__w || 60/scale, h = node.__h || 20/scale;
+      ctx.fillStyle = color;
+      ctx.fillRect(node.x - w/2, node.y - h/2, w, h);
+    })
+
+    // ── Edge rendering (full custom) ────────────────────────────────────────
+    .linkCanvasObjectMode(() => 'replace')
+    .linkCanvasObject((link, ctx) => {
+      const s = link.source, t = link.target;
+      if (!s || !t || s.x == null || t.x == null) return;
+
+      const sid = s.id ?? s, tid = t.id ?? t;
+      const fid = focusedNode?.id;
+      const hid = hoveredNode?.id;
+      const isFocusedEdge = fid && (sid === fid || tid === fid);
+      const isHoveredEdge = hid && (sid === hid || tid === hid);
+      const active = isFocusedEdge || isHoveredEdge;
+
+      const opacity = active
+        ? Math.min(0.9, link.score * 0.7 + 0.2)
+        : (focusedNode ? 0 : (currentZoom > 2 ? 0.12 : 0));
+      if (opacity <= 0.01) return;
+
+      ctx.save();
+      ctx.globalAlpha = opacity;
+      ctx.strokeStyle = EDGE_COLORS[link.dominant] || '#45475a';
+      ctx.lineWidth = active ? Math.max(1, link.score * 5) : 0.8;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(t.x, t.y);
+      ctx.stroke();
+      ctx.restore();
+    })
+
+    // ── Interactions ─────────────────────────────────────────────────────────
+    .onNodeHover(node => {
+      hoveredNode = node ?? null;
+      document.body.style.cursor = node ? 'pointer' : 'default';
+      node ? showNodeTip(node) : hideTip();
+    })
+    .onLinkHover(link => {
+      link ? showEdgeTip(link) : hideTip();
+    })
+    .onNodeClick(node => {
+      if (focusedNode === node) {
+        focusedNode = null;
+        Graph.zoomToFit(600, 40);
+      } else {
+        focusedNode = node;
+        Graph.centerAt(node.x, node.y, 600);
+        Graph.zoom(2.5, 600);
+      }
+      window._bridge?.on_node_clicked?.(node.id);
+    })
+    .onZoom(({k}) => {
+      currentZoom = k;
+    })
+    .d3AlphaDecay(0.02)
+    .d3VelocityDecay(0.4)
+    .autoPauseRedraw(false);  // render every frame so hover state updates immediately
+
+  // Tune D3 forces for cluster layout
+  Graph.d3Force('charge').strength(-300);
+  Graph.d3Force('link')
+    .strength(link => link.score * 0.5)
+    .distance(link => (1 - link.score) * 120 + 40);
+
+  // ── Rounded-rect helper ───────────────────────────────────────────────────
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y,     x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x,     y + h, r);
+    ctx.arcTo(x,     y + h, x,     y,     r);
+    ctx.arcTo(x,     y,     x + w, y,     r);
+    ctx.closePath();
+  }
+
+  // ── Tooltip ───────────────────────────────────────────────────────────────
+  const tip = document.getElementById('tooltip');
+
+  function showNodeTip(node) {
+    let html = `<div class="tip-title">${esc(node.label)}</div>`;
+    if (node.key) html += `<div>Key &nbsp;<b>${esc(node.key)}</b></div>`;
+    if (node.bpm) html += `<div>BPM &nbsp;<b>${node.bpm}</b></div>`;
+    if (node.tags?.length) html += `<div>Tags &nbsp;${node.tags.map(esc).join(', ')}</div>`;
+    tip.innerHTML = html;
+    tip.style.display = 'block';
+  }
+
+  function showEdgeTip(link) {
+    const sc = link.scores || {};
+    const bar = (v, c) => {
+      const pct = Math.round((v ?? 0) * 100);
+      return `<span class="tip-bar" style="width:${Math.round(pct*0.65)}px;background:${c}"></span> ${pct}%`;
+    };
+    tip.innerHTML = `
+      <div class="tip-score">Compatibility: ${Math.round(link.score * 100)}%</div>
+      <div class="tip-row"><span>Key</span><span>${bar(sc.key, EDGE_COLORS.key)}</span></div>
+      <div class="tip-row"><span>BPM</span><span>${bar(sc.bpm, EDGE_COLORS.bpm)}</span></div>
+      <div class="tip-row"><span>Tags</span><span>${bar(sc.tags, EDGE_COLORS.tags)}</span></div>
+      <div class="tip-row"><span>User</span><span>${bar(sc.user, EDGE_COLORS.user)}</span></div>`;
+    tip.style.display = 'block';
+  }
+
+  function hideTip() { tip.style.display = 'none'; }
+
+  document.addEventListener('mousemove', e => {
+    if (tip.style.display !== 'block') return;
+    const x = e.clientX + 16;
+    const y = e.clientY - 10;
+    tip.style.left = (x + 270 > window.innerWidth ? x - 286 : x) + 'px';
+    tip.style.top  = Math.min(y, window.innerHeight - tip.offsetHeight - 10) + 'px';
+  });
+
+  // ── Data injection API ────────────────────────────────────────────────────
+  // Deselect when clicking the canvas background
+  // (force-graph stops propagation on node/link hits, so this only fires on background)
+  document.getElementById('graph').addEventListener('click', () => {
+    if (focusedNode) {
+      focusedNode = null;
+      Graph.zoomToFit(600, 40);
+    }
+  });
+
+  window.setGraphData = function(data) {
+    hoveredNode = null;
+    focusedNode = null;
+    graphData = { nodes: data.nodes, links: data.edges };
+    Graph.graphData(graphData);
+    document.getElementById('status').textContent =
+      `${data.nodes.length} tracks · ${data.edges.length} connections`;
+    // Zoom to fit after the simulation has had time to spread out
+    setTimeout(() => Graph.zoomToFit(800, 40), 1200);
+  };
+
+  // ── Qt WebChannel bridge ──────────────────────────────────────────────────
+  // window._bridge exposes: on_node_clicked(id)
+  // To migrate to web: replace this block with a fetch/WebSocket initialiser
+  // that sets window._bridge to an equivalent object.
+  window._bridge = null;
+
+  if (typeof QWebChannel !== 'undefined' && typeof qt !== 'undefined') {
+    new QWebChannel(qt.webChannelTransport, ch => {
+      window._bridge = ch.objects.bridge;
+      window._bridge.on_ready();
+    });
+  }
+
+  // ── Resize ────────────────────────────────────────────────────────────────
+  window.addEventListener('resize', () => {
+    Graph.width(window.innerWidth).height(window.innerHeight);
+  });
+
+} // end ForceGraph guard
+</script>
+</body>
+</html>

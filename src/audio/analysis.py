@@ -1,4 +1,14 @@
+import os as _os, sys as _sys
+_fd = _sys.stderr.fileno()
+_saved = _os.dup(_fd)
+_null = _os.open(_os.devnull, _os.O_WRONLY)
+_os.dup2(_null, _fd)
+_os.close(_null)
 import essentia.standard as es
+_os.dup2(_saved, _fd)
+_os.close(_saved)
+del _os, _sys, _fd, _saved, _null
+
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3NoHeaderError
 import os

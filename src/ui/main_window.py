@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt, QTimer
 
 from src.ui.library_tab import LibraryTab
 from src.ui.transitions_tab import TransitionsTab
+from src.ui.graph_tab import GraphTab
 from src.ui.options_tab import OptionsTab
 
 
@@ -19,15 +20,19 @@ class MainWindow(QMainWindow):
 
         self._library = LibraryTab(conn)
         self._transitions = TransitionsTab(conn)
+        self._graph = GraphTab(db_path)
         self._options = OptionsTab(db_path)
 
         self._tabs.addTab(self._library, "Library")
         self._tabs.addTab(self._transitions, "Transitions")
+        self._tabs.addTab(self._graph, "Graph")
         self._tabs.addTab(self._options, "Options")
 
         self._library.track_selected.connect(self._on_track_selected)
         self._tabs.currentChanged.connect(self._on_tab_changed)
         self._options.scan_finished.connect(self._on_scan_finished)
+        self._options.weights_changed.connect(self._graph.refresh)
+        self._transitions.transitions_changed.connect(self._graph.refresh)
 
         self._status = QStatusBar()
         self.setStatusBar(self._status)
@@ -38,6 +43,7 @@ class MainWindow(QMainWindow):
     def _on_scan_finished(self) -> None:
         self._library.refresh()
         self._library._rebuild_tag_filter()
+        self._graph.refresh()
         self._update_status()
 
     def _on_track_selected(self, track_id: str, display_name: str) -> None:

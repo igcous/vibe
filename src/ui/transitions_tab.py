@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView,
     QLabel, QGroupBox, QSplitter, QMessageBox,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction
 
 from src.db.queries import (
@@ -17,6 +17,8 @@ TRANSITION_COLUMNS = ["Direction", "Track", "BPM", "Key", "Rating", "Notes"]
 
 
 class TransitionsTab(QWidget):
+    transitions_changed = Signal()
+
     def __init__(self, conn: sqlite3.Connection):
         super().__init__()
         self._conn = conn
@@ -176,6 +178,7 @@ class TransitionsTab(QWidget):
         self._table.blockSignals(False)
 
         update_transition(self._conn, transition_id, rating, notes)
+        self.transitions_changed.emit()
 
     def _save_transition(self) -> None:
         from_id = self._from_combo.currentData()
@@ -197,6 +200,7 @@ class TransitionsTab(QWidget):
         )
         self._notes.clear()
         self._refresh_transitions_table()
+        self.transitions_changed.emit()
 
     def _delete_selected_transition(self) -> None:
         row = self._table.currentRow()
@@ -213,6 +217,7 @@ class TransitionsTab(QWidget):
         if confirm == QMessageBox.StandardButton.Yes:
             delete_transition(self._conn, transition_id)
             self._refresh_transitions_table()
+            self.transitions_changed.emit()
 
     def set_from_track(self, track_id: str) -> None:
         idx = self._from_combo.findData(track_id)
