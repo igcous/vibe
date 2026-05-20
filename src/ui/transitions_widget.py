@@ -14,6 +14,8 @@ from src.db.queries import (
     delete_transition, update_transition, transition_exists,
     get_track, get_track_tags, tag_track, untag_track, get_all_tag_names,
 )
+from src.graph.scoring import transition_score, DEFAULT_WEIGHTS, DEFAULT_RATING_SCORES
+from src.ui.options_tab import load_settings
 
 TRANSITION_COLUMNS = ["Direction", "Track", "BPM", "Key", "Rating", "Notes"]
 
@@ -48,6 +50,7 @@ class TransitionsWidget(QWidget):
             self.tab_widget.addTab(form_widget, "Add transition")
             self.tab_widget.addTab(table_widget, "See transitions")
             self.tab_widget.addTab(self._build_track_info_widget(), "Track info")
+            self.tab_widget.addTab(self._build_next_track_widget(), "Next track")
             layout.addWidget(self.tab_widget)
         else:
             splitter = QSplitter(Qt.Orientation.Vertical)
@@ -153,6 +156,99 @@ class TransitionsWidget(QWidget):
         layout.addStretch()
         return w
 
+    def _build_next_track_widget(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self._next_table = QTableWidget()
+        self._next_table.setColumnCount(3)
+        self._next_table.setHorizontalHeaderLabels(["Track", "Score", "Factor"])
+        self._next_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._next_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._next_table.setAlternatingRowColors(True)
+        self._next_table.verticalHeader().setVisible(False)
+        h = self._next_table.horizontalHeader()
+        h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        h.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        h.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(self._next_table)
+        return w
+
+    _FACTOR_LABELS = {"key": "Key", "bpm": "BPM", "tags": "Tags", "rating": "Rating"}
+
+    def _refresh_next_track(self) -> None:
+        if not hasattr(self, '_next_table'):
+            return
+        self._next_table.setRowCount(0)
+        if not self._from_id:
+            return
+
+        settings = load_settings()
+        weights = settings.get("graph_weights", DEFAULT_WEIGHTS)
+        include_ratings = bool(settings.get("include_user_ratings", False))
+        raw_mults = settings.get("rating_scores", {})
+        rating_scores = (
+            {int(k): v for k, v in raw_mults.items()} if raw_mults else DEFAULT_RATING_SCORES
+        )
+
+        current_row = self._conn.execute("""
+            SELECT t.*, GROUP_CONCAT(tg.name, ', ') AS tags
+            FROM tracks t
+            LEFT JOIN track_tags tt ON tt.track_id = t.id
+            LEFT JOIN tags tg ON tg.id = tt.tag_id
+            WHERE t.id = ?
+            GROUP BY t.id
+        """, (self._from_id,)).fetchone()
+        if not current_row:
+            return
+
+        outgoing = self._conn.execute(
+            "SELECT to_track, rating FROM transitions WHERE from_track = ?",
+            (self._from_id,)
+        ).fetchall()
+        rating_map = {row["to_track"]: row["rating"] for row in outgoing}
+
+        candidates = self._conn.execute("""
+            SELECT t.*, GROUP_CONCAT(tg.name, ', ') AS tags
+            FROM tracks t
+            LEFT JOIN track_tags tt ON tt.track_id = t.id
+            LEFT JOIN tags tg ON tg.id = tt.tag_id
+            WHERE t.id != ? AND t.is_available = 1
+            GROUP BY t.id
+        """, (self._from_id,)).fetchall()
+
+        def parse_tags(row) -> list[str]:
+            raw = row["tags"] or ""
+            return [t.strip() for t in raw.split(",") if t.strip()]
+
+        current_dict = dict(current_row)
+        current_dict["tags"] = parse_tags(current_row)
+
+        results = []
+        for c in candidates:
+            c_dict = dict(c)
+            c_dict["tags"] = parse_tags(c)
+            user_rating = rating_map.get(c["id"])
+            score, dominant, _ = transition_score(
+                current_dict, c_dict, user_rating, weights,
+                include_user_ratings=include_ratings,
+                rating_scores=rating_scores,
+            )
+            factor = dominant
+            artist = c["artist"] or ""
+            title = c["title"] or ""
+            display = f"{artist} — {title}" if artist else title
+            results.append((score, display, self._FACTOR_LABELS.get(factor, factor)))
+
+        results.sort(key=lambda x: x[0], reverse=True)
+        for score, display, factor_label in results[:5]:
+            r = self._next_table.rowCount()
+            self._next_table.insertRow(r)
+            for col, val in enumerate([display, f"{score:.0%}", factor_label]):
+                item = QTableWidgetItem(val)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+                self._next_table.setItem(r, col, item)
+
     def _refresh_track_info(self) -> None:
         if not hasattr(self, '_info_bpm') or not self._from_id:
             return
@@ -215,6 +311,7 @@ class TransitionsWidget(QWidget):
             self._from_combo.blockSignals(False)
 
         self._refresh_transitions_table()
+        self._refresh_next_track()
 
     def _on_from_changed(self) -> None:
         self._refresh_transitions_table()
@@ -337,6 +434,7 @@ class TransitionsWidget(QWidget):
                 self._selected_track_label.setText(name)
             self._refresh_transitions_table()
             self._refresh_track_info()
+            self._refresh_next_track()
         else:
             idx = self._from_combo.findData(track_id)
             if idx >= 0:

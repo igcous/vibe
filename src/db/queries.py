@@ -214,6 +214,26 @@ def transition_exists(conn: sqlite3.Connection, from_id: str, to_id: str) -> boo
     return row is not None
 
 
+def get_all_transitions(conn: sqlite3.Connection, query: str = "") -> list[sqlite3.Row]:
+    sql = """
+        SELECT
+            tr.id,
+            t1.artist AS from_artist, t1.title AS from_title,
+            t2.artist AS to_artist,   t2.title AS to_title,
+            tr.rating
+        FROM transitions tr
+        JOIN tracks t1 ON tr.from_track = t1.id
+        JOIN tracks t2 ON tr.to_track   = t2.id
+    """
+    params: list = []
+    if query:
+        like = f"%{query}%"
+        sql += " WHERE (t1.title LIKE ? OR t1.artist LIKE ? OR t2.title LIKE ? OR t2.artist LIKE ?)"
+        params = [like, like, like, like]
+    sql += " ORDER BY t1.artist, t1.title, t2.artist, t2.title"
+    return conn.execute(sql, params).fetchall()
+
+
 def get_transitions_for_track(conn: sqlite3.Connection, track_id: str) -> dict[str, list[sqlite3.Row]]:
     outgoing = conn.execute("""
         SELECT tr.*, t.title AS to_title, t.artist AS to_artist

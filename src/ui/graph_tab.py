@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtCore import QObject, Signal, Slot, QUrl, Qt, QStringListModel
+from PySide6.QtCore import QObject, Signal, Slot, QUrl, Qt, QStringListModel, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QSplitter, QGroupBox, QDoubleSpinBox, QCheckBox,
@@ -13,11 +13,18 @@ from PySide6.QtWidgets import (
 )
 
 from src.graph.builder import build_graph_data
-from src.graph.scoring import DEFAULT_WEIGHTS, DEFAULT_RATING_MULTIPLIERS
+from src.graph.scoring import DEFAULT_WEIGHTS, DEFAULT_RATING_SCORES
 from src.db.schema import init_db
 from src.ui.options_tab import load_settings, save_settings
+from src.ui.transitions_widget import TransitionsWidget
 
 _HTML = Path(__file__).parent / "graph.html"
+
+
+class _BottomPanel(TransitionsWidget):
+    """TransitionsWidget that reports zero minimum size so the splitter can fully collapse it."""
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, 0)
 
 _WEIGHT_LABELS = [
     ("key",  "Key compatibility"),
@@ -81,15 +88,20 @@ class GraphTab(QWidget):
 
         self._search_model = QStringListModel(self)
         self._search_bar = QLineEdit()
-        self._search_bar.setPlaceholderText("Search tracks…")
-        self._search_bar.setContentsMargins(6, 6, 6, 4)
+        self._search_bar.setPlaceholderText("Filter by title or artist…")
         completer = QCompleter(self._search_model, self)
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         completer.setFilterMode(Qt.MatchFlag.MatchContains)
         completer.setMaxVisibleItems(10)
         self._search_bar.setCompleter(completer)
         completer.activated.connect(self._on_search_activated)
-        outer.addWidget(self._search_bar)
+
+        search_row = QHBoxLayout()
+        search_row.setContentsMargins(8, 8, 8, 6)
+        search_row.setSpacing(6)
+        search_row.addWidget(QLabel("Search:"))
+        search_row.addWidget(self._search_bar)
+        outer.addLayout(search_row)
 
         self._vsplit = QSplitter(Qt.Orientation.Vertical)
 
@@ -101,8 +113,7 @@ class GraphTab(QWidget):
         self._vsplit.addWidget(self._hsplit)
 
         # ── Bottom: transitions panel (hidden until a node is clicked) ───────
-        from src.ui.transitions_widget import TransitionsWidget
-        self._bottom_panel = TransitionsWidget(self._conn, readonly_from=True, tabbed=True)
+        self._bottom_panel = _BottomPanel(self._conn, readonly_from=True, tabbed=True)
         self._bottom_panel.transitions_changed.connect(self.bottom_panel_transitions_changed)
 
         close_btn = QToolButton()
@@ -155,17 +166,17 @@ class GraphTab(QWidget):
         self._include_ratings_cb.toggled.connect(self._on_include_ratings_toggled)
         layout.addWidget(self._include_ratings_cb)
 
-        saved_mults = settings.get("rating_multipliers", {})
+        saved_mults = settings.get("rating_scores", {})
         _MULT_LABELS = [(1, "★"), (2, "★★"), (3, "★★★")]
-        mults_box = QGroupBox("Rating Multipliers")
+        mults_box = QGroupBox("Rating Scores")
         mults_form = QFormLayout(mults_box)
         mults_form.setSpacing(6)
         for rating, label in _MULT_LABELS:
             spin = QDoubleSpinBox()
-            spin.setRange(1.0, 5.0)
+            spin.setRange(0.0, 1.0)
             spin.setSingleStep(0.05)
             spin.setDecimals(2)
-            default = DEFAULT_RATING_MULTIPLIERS[rating]
+            default = DEFAULT_RATING_SCORES[rating]
             spin.setValue(float(saved_mults.get(str(rating), default)))
             spin.valueChanged.connect(self._on_rating_multiplier_changed)
             mults_form.addRow(label + ":", spin)
@@ -196,7 +207,7 @@ class GraphTab(QWidget):
 
     def _on_rating_multiplier_changed(self) -> None:
         settings = load_settings()
-        settings["rating_multipliers"] = {
+        settings["rating_scores"] = {
             str(r): round(s.value(), 2)
             for r, s in self._rating_multiplier_inputs.items()
         }
@@ -254,7 +265,7 @@ class GraphTab(QWidget):
     def _start_compute(self) -> None:
         weights = {k: round(s.value(), 2) for k, s in self._weight_inputs.items()} if self._weight_inputs else DEFAULT_WEIGHTS
         include_user_ratings = self._include_ratings_cb.isChecked() if hasattr(self, '_include_ratings_cb') else False
-        rating_multipliers = {r: round(s.value(), 2) for r, s in self._rating_multiplier_inputs.items()} if self._rating_multiplier_inputs else DEFAULT_RATING_MULTIPLIERS
+        rating_scores = {r: round(s.value(), 2) for r, s in self._rating_multiplier_inputs.items()} if self._rating_multiplier_inputs else DEFAULT_RATING_SCORES
         db_path = self._db_path
 
         sig = _ComputeSignal()
@@ -264,7 +275,7 @@ class GraphTab(QWidget):
         def worker() -> None:
             try:
                 conn = init_db(db_path)
-                data = build_graph_data(conn, weights, include_user_ratings=include_user_ratings, rating_multipliers=rating_multipliers)
+                data = build_graph_data(conn, weights, include_user_ratings=include_user_ratings, rating_scores=rating_scores)
                 conn.close()
                 result = json.dumps(data)
             except Exception:
@@ -280,6 +291,7 @@ class GraphTab(QWidget):
             self._run_js(json_str)
         else:
             self._pending_json = json_str
+        self._bottom_panel._refresh_next_track()
 
     def _run_js(self, json_str: str) -> None:
         self._view.page().runJavaScript(f"window.setGraphData({json_str})")
