@@ -21,6 +21,18 @@
     .tip-bar    { display: inline-block; height: 4px; border-radius: 2px;
                   vertical-align: middle; margin-left: 4px; }
 
+    #graph-controls {
+      position: fixed; top: 10px; right: 10px; z-index: 95;
+      display: flex; gap: 6px;
+    }
+    #graph-controls button {
+      background: #181825; border: 1px solid #45475a; border-radius: 6px;
+      color: #a6adc8; font: 12px 'Segoe UI', system-ui, sans-serif;
+      padding: 5px 10px; cursor: pointer;
+    }
+    #graph-controls button:hover { background: #313244; color: #cdd6f4; border-color: #cba6f7; }
+    #graph-controls button.active { border-color: #cba6f7; color: #cdd6f4; }
+
     #status {
       position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
       color: #45475a; font: 11px system-ui; pointer-events: none;
@@ -38,6 +50,10 @@
 <body>
 
 <div id="graph"></div>
+<div id="graph-controls">
+  <button id="config-btn" class="active" title="Toggle configuration panel">&#9881; Config</button>
+  <button id="zoom-fit-btn" title="Zoom to fit all tracks">&#8855; Fit</button>
+</div>
 <div id="tooltip"></div>
 <div id="status"></div>
 <div id="error">Could not load graph library.<br>An internet connection is required on first use.</div>
@@ -252,6 +268,19 @@ if (typeof ForceGraph === 'undefined') {
     }
   });
 
+  window.selectNode = function(id) {
+    const node = graphData.nodes.find(n => n.id === id);
+    if (!node) return;
+    focusedNode = node;
+    Graph.centerAt(node.x, node.y, 600);
+    Graph.zoom(2.5, 600);
+  };
+
+  window.fitAll = function() {
+    focusedNode = null;
+    Graph.zoomToFit(600, 40);
+  };
+
   window.setGraphData = function(data) {
     hoveredNode = null;
     focusedNode = null;
@@ -259,8 +288,7 @@ if (typeof ForceGraph === 'undefined') {
     Graph.graphData(graphData);
     document.getElementById('status').textContent =
       `${data.nodes.length} tracks · ${data.edges.length} connections`;
-    // Zoom to fit after the simulation has had time to spread out
-    setTimeout(() => Graph.zoomToFit(800, 40), 1200);
+    setTimeout(fitAll, 1200);
   };
 
   // ── Qt WebChannel bridge ──────────────────────────────────────────────────
@@ -275,6 +303,15 @@ if (typeof ForceGraph === 'undefined') {
       window._bridge.on_ready();
     });
   }
+
+  document.getElementById('zoom-fit-btn').addEventListener('click', fitAll);
+
+  let _configOpen = true;
+  document.getElementById('config-btn').addEventListener('click', () => {
+    _configOpen = !_configOpen;
+    document.getElementById('config-btn').classList.toggle('active', _configOpen);
+    window._bridge?.on_toggle_config?.();
+  });
 
   // ── Resize ────────────────────────────────────────────────────────────────
   window.addEventListener('resize', () => {

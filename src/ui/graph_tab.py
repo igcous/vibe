@@ -5,15 +5,15 @@ from pathlib import Path
 
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtCore import QObject, Signal, Slot, QUrl, Qt
+from PySide6.QtCore import QObject, Signal, Slot, QUrl, Qt, QStringListModel
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QSplitter, QGroupBox, QDoubleSpinBox, QCheckBox,
-    QPushButton, QLabel, QToolButton,
+    QPushButton, QLabel, QToolButton, QLineEdit, QCompleter,
 )
 
 from src.graph.builder import build_graph_data
-from src.graph.scoring import DEFAULT_WEIGHTS
+from src.graph.scoring import DEFAULT_WEIGHTS, DEFAULT_RATING_MULTIPLIERS
 from src.db.schema import init_db
 from src.ui.options_tab import load_settings, save_settings
 
@@ -29,6 +29,7 @@ _WEIGHT_LABELS = [
 class _Bridge(QObject):
     graph_ready = Signal()
     node_clicked = Signal(str)
+    toggle_config = Signal()
 
     @Slot()
     def on_ready(self) -> None:
@@ -37,6 +38,10 @@ class _Bridge(QObject):
     @Slot(str)
     def on_node_clicked(self, track_id: str) -> None:
         self.node_clicked.emit(track_id)
+
+    @Slot()
+    def on_toggle_config(self) -> None:
+        self.toggle_config.emit()
 
 
 class _ComputeSignal(QObject):
@@ -63,12 +68,28 @@ class GraphTab(QWidget):
 
         self._bridge.graph_ready.connect(self._on_page_ready)
         self._bridge.node_clicked.connect(self._on_node_clicked)
+        self._bridge.toggle_config.connect(self._toggle_config_panel)
 
         self._weight_inputs: dict[str, QDoubleSpinBox] = {}
+        self._rating_multiplier_inputs: dict[int, QDoubleSpinBox] = {}
         self._include_ratings_cb: QCheckBox
+        self._search_track_map: dict[str, str] = {}
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self._search_model = QStringListModel(self)
+        self._search_bar = QLineEdit()
+        self._search_bar.setPlaceholderText("Search tracks…")
+        self._search_bar.setContentsMargins(6, 6, 6, 4)
+        completer = QCompleter(self._search_model, self)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        completer.setMaxVisibleItems(10)
+        self._search_bar.setCompleter(completer)
+        completer.activated.connect(self._on_search_activated)
+        outer.addWidget(self._search_bar)
 
         self._vsplit = QSplitter(Qt.Orientation.Vertical)
 
@@ -80,32 +101,22 @@ class GraphTab(QWidget):
         self._vsplit.addWidget(self._hsplit)
 
         # ── Bottom: transitions panel (hidden until a node is clicked) ───────
-        from src.ui.transitions_tab import TransitionsTab
-        self._bottom_panel = TransitionsTab(self._conn)
+        from src.ui.transitions_widget import TransitionsWidget
+        self._bottom_panel = TransitionsWidget(self._conn, readonly_from=True, tabbed=True)
         self._bottom_panel.transitions_changed.connect(self.bottom_panel_transitions_changed)
 
-        bottom_container = QWidget()
-        bottom_layout = QVBoxLayout(bottom_container)
-        bottom_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_layout.setSpacing(0)
-
-        header = QWidget()
-        header_row = QHBoxLayout(header)
-        header_row.setContentsMargins(8, 4, 4, 4)
-        header_row.addStretch()
         close_btn = QToolButton()
         close_btn.setText("✕")
         close_btn.setToolTip("Close panel")
         close_btn.clicked.connect(self._close_bottom_panel)
-        header_row.addWidget(close_btn)
-        bottom_layout.addWidget(header)
-        bottom_layout.addWidget(self._bottom_panel)
+        self._bottom_panel.tab_widget.setCornerWidget(close_btn, Qt.Corner.TopRightCorner)
 
-        self._vsplit.addWidget(bottom_container)
-        self._vsplit.setSizes([700, 0])
+        self._vsplit.addWidget(self._bottom_panel)
+        self._bottom_panel.hide()
 
         outer.addWidget(self._vsplit)
 
+        self._load_search_tracks()
         self._view.load(QUrl.fromLocalFile(str(_HTML.resolve())))
 
     # ── Side panel ───────────────────────────────────────────────────────────
@@ -113,7 +124,6 @@ class GraphTab(QWidget):
     def _build_side_panel(self) -> QWidget:
         panel = QWidget()
         panel.setMinimumWidth(180)
-        panel.setMaximumWidth(280)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(10)
@@ -145,6 +155,23 @@ class GraphTab(QWidget):
         self._include_ratings_cb.toggled.connect(self._on_include_ratings_toggled)
         layout.addWidget(self._include_ratings_cb)
 
+        saved_mults = settings.get("rating_multipliers", {})
+        _MULT_LABELS = [(1, "★"), (2, "★★"), (3, "★★★")]
+        mults_box = QGroupBox("Rating Multipliers")
+        mults_form = QFormLayout(mults_box)
+        mults_form.setSpacing(6)
+        for rating, label in _MULT_LABELS:
+            spin = QDoubleSpinBox()
+            spin.setRange(1.0, 5.0)
+            spin.setSingleStep(0.05)
+            spin.setDecimals(2)
+            default = DEFAULT_RATING_MULTIPLIERS[rating]
+            spin.setValue(float(saved_mults.get(str(rating), default)))
+            spin.valueChanged.connect(self._on_rating_multiplier_changed)
+            mults_form.addRow(label + ":", spin)
+            self._rating_multiplier_inputs[rating] = spin
+        layout.addWidget(mults_box)
+
         redo_btn = QPushButton("Redo Graph")
         redo_btn.clicked.connect(self._on_redo_clicked)
         layout.addWidget(redo_btn)
@@ -167,6 +194,14 @@ class GraphTab(QWidget):
         settings["include_user_ratings"] = checked
         save_settings(settings)
 
+    def _on_rating_multiplier_changed(self) -> None:
+        settings = load_settings()
+        settings["rating_multipliers"] = {
+            str(r): round(s.value(), 2)
+            for r, s in self._rating_multiplier_inputs.items()
+        }
+        save_settings(settings)
+
     def _on_redo_clicked(self) -> None:
         if self._page_ready:
             self._start_compute()
@@ -175,8 +210,36 @@ class GraphTab(QWidget):
 
     def refresh(self) -> None:
         """Recompute graph data and push to JS. Safe to call at any time."""
+        self._load_search_tracks()
         if self._page_ready:
             self._start_compute()
+
+    def fit_view(self) -> None:
+        if self._page_ready:
+            self._view.page().runJavaScript("window.fitAll()")
+
+    def _load_search_tracks(self) -> None:
+        rows = self._conn.execute(
+            "SELECT id, artist, title FROM tracks WHERE is_available=1 ORDER BY artist, title"
+        ).fetchall()
+        self._search_track_map = {}
+        names = []
+        for r in rows:
+            artist = r[1] or ""
+            title = r[2] or ""
+            name = f"{artist} — {title}" if artist else title
+            self._search_track_map[name] = r[0]
+            names.append(name)
+        self._search_model.setStringList(names)
+
+    def _on_search_activated(self, text: str) -> None:
+        track_id = self._search_track_map.get(text)
+        if track_id:
+            self._search_bar.clear()
+            if self._page_ready:
+                safe_id = track_id.replace("'", "\\'")
+                self._view.page().runJavaScript(f"window.selectNode('{safe_id}')")
+            self._on_node_clicked(track_id)
 
     # ── Internal ────────────────────────────────────────────────────────────
 
@@ -191,6 +254,7 @@ class GraphTab(QWidget):
     def _start_compute(self) -> None:
         weights = {k: round(s.value(), 2) for k, s in self._weight_inputs.items()} if self._weight_inputs else DEFAULT_WEIGHTS
         include_user_ratings = self._include_ratings_cb.isChecked() if hasattr(self, '_include_ratings_cb') else False
+        rating_multipliers = {r: round(s.value(), 2) for r, s in self._rating_multiplier_inputs.items()} if self._rating_multiplier_inputs else DEFAULT_RATING_MULTIPLIERS
         db_path = self._db_path
 
         sig = _ComputeSignal()
@@ -200,7 +264,7 @@ class GraphTab(QWidget):
         def worker() -> None:
             try:
                 conn = init_db(db_path)
-                data = build_graph_data(conn, weights, include_user_ratings=include_user_ratings)
+                data = build_graph_data(conn, weights, include_user_ratings=include_user_ratings, rating_multipliers=rating_multipliers)
                 conn.close()
                 result = json.dumps(data)
             except Exception:
@@ -221,13 +285,20 @@ class GraphTab(QWidget):
         self._view.page().runJavaScript(f"window.setGraphData({json_str})")
 
     def _on_node_clicked(self, track_id: str) -> None:
-        sizes = self._vsplit.sizes()
-        if sum(sizes) > 0 and sizes[1] == 0:
-            total = sum(sizes)
+        if self._bottom_panel.isHidden():
+            self._bottom_panel.show()
+            total = self._vsplit.height()
             self._vsplit.setSizes([int(total * 0.6), int(total * 0.4)])
         self._bottom_panel.set_from_track(track_id)
         self._bottom_panel.refresh()
 
     def _close_bottom_panel(self) -> None:
-        total = sum(self._vsplit.sizes())
-        self._vsplit.setSizes([total, 0])
+        self._bottom_panel.hide()
+
+    def _toggle_config_panel(self) -> None:
+        sizes = self._hsplit.sizes()
+        total = sum(sizes)
+        if sizes[1] == 0:
+            self._hsplit.setSizes([total - 220, 220])
+        else:
+            self._hsplit.setSizes([total, 0])

@@ -1,7 +1,7 @@
 import sqlite3
 from collections import defaultdict
 
-from src.graph.scoring import transition_score, DEFAULT_WEIGHTS
+from src.graph.scoring import transition_score, DEFAULT_WEIGHTS, DEFAULT_RATING_MULTIPLIERS
 
 
 def build_graph_data(
@@ -10,6 +10,7 @@ def build_graph_data(
     score_threshold: float = 0.5,
     max_neighbors: int = 10,
     include_user_ratings: bool = False,
+    rating_multipliers: dict[int, float] | None = None,
 ) -> dict:
     weights = weights or DEFAULT_WEIGHTS
 
@@ -62,7 +63,7 @@ def build_graph_data(
             a, b = tracks[i], tracks[j]
             rating = (user_ratings.get((a["id"], b["id"]))
                       or user_ratings.get((b["id"], a["id"])))
-            score, dominant, components = transition_score(a, b, rating, weights, include_user_ratings)
+            score, dominant, components = transition_score(a, b, rating, weights, include_user_ratings, rating_multipliers)
             if score >= score_threshold:
                 pair_scores[(a["id"], b["id"])] = (score, dominant, components)
 

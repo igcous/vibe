@@ -206,6 +206,14 @@ def add_transition(
     return cur.lastrowid
 
 
+def transition_exists(conn: sqlite3.Connection, from_id: str, to_id: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM transitions WHERE from_track = ? AND to_track = ?",
+        (from_id, to_id),
+    ).fetchone()
+    return row is not None
+
+
 def get_transitions_for_track(conn: sqlite3.Connection, track_id: str) -> dict[str, list[sqlite3.Row]]:
     outgoing = conn.execute("""
         SELECT tr.*, t.title AS to_title, t.artist AS to_artist

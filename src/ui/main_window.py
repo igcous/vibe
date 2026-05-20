@@ -3,7 +3,6 @@ from PySide6.QtWidgets import QMainWindow, QTabWidget, QStatusBar
 from PySide6.QtCore import Qt, QTimer
 
 from src.ui.library_tab import LibraryTab
-from src.ui.transitions_tab import TransitionsTab
 from src.ui.graph_tab import GraphTab
 from src.ui.options_tab import OptionsTab
 
@@ -13,27 +12,22 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._conn = conn
         self.setWindowTitle("DJ Transition Companion")
-        self.resize(1100, 700)
 
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
 
         self._library = LibraryTab(conn)
-        self._transitions = TransitionsTab(conn)
         self._graph = GraphTab(conn, db_path)
         self._options = OptionsTab(db_path)
 
         self._tabs.addTab(self._library, "Library")
-        self._tabs.addTab(self._transitions, "Transitions")
         self._tabs.addTab(self._graph, "Graph")
         self._tabs.addTab(self._options, "Options")
 
         self._library.track_selected.connect(self._on_track_selected)
         self._tabs.currentChanged.connect(self._on_tab_changed)
         self._options.scan_finished.connect(self._on_scan_finished)
-        self._transitions.transitions_changed.connect(self._graph.refresh)
         self._graph.bottom_panel_transitions_changed.connect(self._graph.refresh)
-        self._graph.bottom_panel_transitions_changed.connect(self._transitions.refresh)
         self._graph.bottom_panel_transitions_changed.connect(self._library.refresh)
 
         self._status = QStatusBar()
@@ -51,12 +45,8 @@ class MainWindow(QMainWindow):
         self._status.showMessage(f"Selected: {display_name}")
 
     def _on_tab_changed(self, index: int) -> None:
-        if index == 1:
-            # Sync library selection → transitions "from" selector
-            sel = self._library.selected_track()
-            if sel:
-                self._transitions.set_from_track(sel[0])
-            self._transitions.refresh()
+        if index == 1:  # Graph
+            self._graph.fit_view()
         self._update_status()
 
     def _update_status(self) -> None:

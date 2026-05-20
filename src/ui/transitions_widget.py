@@ -3,25 +3,30 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QComboBox, QSpinBox, QTextEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QLabel, QGroupBox, QSplitter, QMessageBox,
+    QLabel, QSplitter, QMessageBox, QTabWidget,
+    QListWidget, QLineEdit, QCompleter,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QStringListModel
 from PySide6.QtGui import QAction
 
 from src.db.queries import (
     get_all_tracks, add_transition, get_transitions_for_track,
-    delete_transition, update_transition,
+    delete_transition, update_transition, transition_exists,
+    get_track, get_track_tags, tag_track, untag_track, get_all_tag_names,
 )
 
 TRANSITION_COLUMNS = ["Direction", "Track", "BPM", "Key", "Rating", "Notes"]
 
 
-class TransitionsTab(QWidget):
+class TransitionsWidget(QWidget):
     transitions_changed = Signal()
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: sqlite3.Connection, readonly_from: bool = False, tabbed: bool = False):
         super().__init__()
         self._conn = conn
+        self._readonly_from = readonly_from
+        self._tabbed = tabbed
+        self._from_id: str | None = None
         self._track_map: dict[str, str] = {}   # id → display name
         self._build_ui()
         self._load_tracks()
@@ -31,17 +36,36 @@ class TransitionsTab(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
+        form_widget = self._build_form_widget()
+        table_widget = self._build_table_widget()
 
-        # ── Create transition form ──────────────────────────────────────────
-        form_box = QGroupBox("Add Transition")
+        if self._tabbed:
+            self._selected_track_label = QLabel()
+            self._selected_track_label.setStyleSheet("font-weight: bold; padding: 2px 2px;")
+            layout.addWidget(self._selected_track_label)
+
+            self.tab_widget = QTabWidget()
+            self.tab_widget.addTab(form_widget, "Add transition")
+            self.tab_widget.addTab(table_widget, "See transitions")
+            self.tab_widget.addTab(self._build_track_info_widget(), "Track info")
+            layout.addWidget(self.tab_widget)
+        else:
+            splitter = QSplitter(Qt.Orientation.Vertical)
+            splitter.addWidget(form_widget)
+            splitter.addWidget(table_widget)
+            splitter.setSizes([200, 400])
+            layout.addWidget(splitter)
+
+    def _build_form_widget(self) -> QWidget:
+        form_box = QWidget()
         form_layout = QFormLayout(form_box)
         form_layout.setSpacing(6)
 
-        self._from_combo = QComboBox()
-        self._from_combo.setMinimumWidth(300)
-        self._from_combo.currentIndexChanged.connect(self._on_from_changed)
-        form_layout.addRow("From:", self._from_combo)
+        if not self._readonly_from:
+            self._from_combo = QComboBox()
+            self._from_combo.setMinimumWidth(300)
+            self._from_combo.currentIndexChanged.connect(self._on_from_changed)
+            form_layout.addRow("From:", self._from_combo)
 
         self._to_combo = QComboBox()
         self._to_combo.setMinimumWidth(300)
@@ -61,10 +85,10 @@ class TransitionsTab(QWidget):
         save_btn.clicked.connect(self._save_transition)
         form_layout.addRow("", save_btn)
 
-        splitter.addWidget(form_box)
+        return form_box
 
-        # ── Existing transitions table ──────────────────────────────────────
-        view_box = QGroupBox("Transitions for selected track")
+    def _build_table_widget(self) -> QWidget:
+        view_box = QWidget()
         view_layout = QVBoxLayout(view_box)
 
         self._table = QTableWidget()
@@ -83,29 +107,112 @@ class TransitionsTab(QWidget):
         self._table.addAction(delete_action)
         view_layout.addWidget(self._table)
 
-        splitter.addWidget(view_box)
-        splitter.setSizes([200, 400])
-        layout.addWidget(splitter)
+        return view_box
+
+    def _build_track_info_widget(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        form = QFormLayout()
+        form.setSpacing(4)
+        self._info_bpm = QLabel("—")
+        self._info_key = QLabel("—")
+        form.addRow("BPM:", self._info_bpm)
+        form.addRow("Key:", self._info_key)
+        layout.addLayout(form)
+
+        layout.addWidget(QLabel("Tags:"))
+        self._tag_list = QListWidget()
+        self._tag_list.currentItemChanged.connect(
+            lambda cur, _: self._tag_remove_btn.setEnabled(cur is not None)
+        )
+        layout.addWidget(self._tag_list)
+
+        self._tag_remove_btn = QPushButton("Remove selected")
+        self._tag_remove_btn.setEnabled(False)
+        self._tag_remove_btn.clicked.connect(self._on_tag_remove)
+        layout.addWidget(self._tag_remove_btn)
+
+        add_row = QHBoxLayout()
+        self._tag_input = QLineEdit()
+        self._tag_input.setPlaceholderText("Add tag…")
+        self._tag_input.returnPressed.connect(self._on_tag_add)
+        self._tag_completer_model = QStringListModel()
+        completer = QCompleter(self._tag_completer_model, self._tag_input)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self._tag_input.setCompleter(completer)
+        add_row.addWidget(self._tag_input)
+        add_btn = QPushButton("Add")
+        add_btn.clicked.connect(self._on_tag_add)
+        add_row.addWidget(add_btn)
+        layout.addLayout(add_row)
+
+        layout.addStretch()
+        return w
+
+    def _refresh_track_info(self) -> None:
+        if not hasattr(self, '_info_bpm') or not self._from_id:
+            return
+        track = get_track(self._conn, self._from_id)
+        if track:
+            self._info_bpm.setText(str(track["bpm"]) if track["bpm"] is not None else "—")
+            self._info_key.setText(track["key_open"] or "—")
+        else:
+            self._info_bpm.setText("—")
+            self._info_key.setText("—")
+        self._reload_tag_list()
+
+    def _reload_tag_list(self) -> None:
+        self._tag_list.clear()
+        if self._from_id:
+            for name in get_track_tags(self._conn, self._from_id):
+                self._tag_list.addItem(name)
+        self._tag_remove_btn.setEnabled(False)
+        self._tag_completer_model.setStringList(get_all_tag_names(self._conn))
+
+    def _on_tag_add(self) -> None:
+        name = self._tag_input.text().strip()
+        if not name or not self._from_id:
+            return
+        tag_track(self._conn, self._from_id, name)
+        self._tag_input.clear()
+        self._reload_tag_list()
+        self.transitions_changed.emit()
+
+    def _on_tag_remove(self) -> None:
+        item = self._tag_list.currentItem()
+        if item is None or not self._from_id:
+            return
+        untag_track(self._conn, self._from_id, item.text())
+        self._reload_tag_list()
+        self.transitions_changed.emit()
 
     def _load_tracks(self) -> None:
         tracks = get_all_tracks(self._conn)
         self._track_map = {}
 
-        self._from_combo.blockSignals(True)
         self._to_combo.blockSignals(True)
-        self._from_combo.clear()
         self._to_combo.clear()
+
+        if not self._readonly_from:
+            self._from_combo.blockSignals(True)
+            self._from_combo.clear()
 
         for t in tracks:
             artist = t["artist"] or ""
             title = t["title"] or ""
             display = f"{artist} — {title}" if artist else title
             self._track_map[t["id"]] = display
-            self._from_combo.addItem(display, userData=t["id"])
+            if not self._readonly_from:
+                self._from_combo.addItem(display, userData=t["id"])
             self._to_combo.addItem(display, userData=t["id"])
 
-        self._from_combo.blockSignals(False)
         self._to_combo.blockSignals(False)
+        if not self._readonly_from:
+            self._from_combo.blockSignals(False)
 
         self._refresh_transitions_table()
 
@@ -113,7 +220,7 @@ class TransitionsTab(QWidget):
         self._refresh_transitions_table()
 
     def _refresh_transitions_table(self) -> None:
-        track_id = self._from_combo.currentData()
+        track_id = self._from_id if self._readonly_from else self._from_combo.currentData()
         self._table.blockSignals(True)
         if not track_id:
             self._table.setRowCount(0)
@@ -181,7 +288,7 @@ class TransitionsTab(QWidget):
         self.transitions_changed.emit()
 
     def _save_transition(self) -> None:
-        from_id = self._from_combo.currentData()
+        from_id = self._from_id if self._readonly_from else self._from_combo.currentData()
         to_id = self._to_combo.currentData()
 
         if not from_id or not to_id:
@@ -189,6 +296,9 @@ class TransitionsTab(QWidget):
             return
         if from_id == to_id:
             QMessageBox.warning(self, "Invalid", "From and To tracks must be different.")
+            return
+        if transition_exists(self._conn, from_id, to_id):
+            QMessageBox.warning(self, "Duplicate", "A transition from this track to the selected track already exists.")
             return
 
         add_transition(
@@ -220,9 +330,17 @@ class TransitionsTab(QWidget):
             self.transitions_changed.emit()
 
     def set_from_track(self, track_id: str) -> None:
-        idx = self._from_combo.findData(track_id)
-        if idx >= 0:
-            self._from_combo.setCurrentIndex(idx)
+        if self._readonly_from:
+            self._from_id = track_id
+            name = self._track_map.get(track_id, track_id)
+            if hasattr(self, '_selected_track_label'):
+                self._selected_track_label.setText(name)
+            self._refresh_transitions_table()
+            self._refresh_track_info()
+        else:
+            idx = self._from_combo.findData(track_id)
+            if idx >= 0:
+                self._from_combo.setCurrentIndex(idx)
 
     def refresh(self) -> None:
         self._load_tracks()

@@ -1,8 +1,7 @@
 import math
 
 DEFAULT_WEIGHTS = {"key": 0.5, "bpm": 0.3, "tags": 0.2}
-
-_RATING_MULTIPLIERS = {3: None, 2: 1.2, 1: 1.1}  # None means force 1.0
+DEFAULT_RATING_MULTIPLIERS = {1: 1.25, 2: 1.5, 3: 2.0}
 
 
 def key_score(key_a: str | None, key_b: str | None) -> float:
@@ -39,12 +38,11 @@ def bpm_score(bpm_a: int | None, bpm_b: int | None) -> float:
 
 
 def tag_score(tags_a: list[str], tags_b: list[str]) -> float:
-    if not tags_a and not tags_b:
-        return 0.5
     if not tags_a or not tags_b:
-        return 0.2
+        return 0.5
     sa, sb = set(tags_a), set(tags_b)
-    return len(sa & sb) / len(sa | sb)
+    jaccard = len(sa & sb) / len(sa | sb)
+    return 0.5 + jaccard * 0.5
 
 
 def transition_score(
@@ -53,6 +51,7 @@ def transition_score(
     user_rating: int | None,
     weights: dict[str, float],
     include_user_ratings: bool = False,
+    rating_multipliers: dict[int, float] | None = None,
 ) -> tuple[float, str, dict[str, float]]:
     """Returns (total_score 0-1, dominant_component, raw_component_scores)."""
     k = key_score(track_a.get("key_open"), track_b.get("key_open"))
@@ -68,8 +67,9 @@ def transition_score(
     dominant = max(weighted, key=weighted.__getitem__)
 
     if include_user_ratings and user_rating is not None:
-        mult = _RATING_MULTIPLIERS.get(user_rating)
-        score = 1.0 if mult is None else min(1.0, base_score * mult)
+        mults = rating_multipliers or DEFAULT_RATING_MULTIPLIERS
+        mult = mults.get(user_rating, 1.0)
+        score = min(1.0, base_score * mult)
     else:
         score = base_score
 

@@ -70,7 +70,7 @@ class LibraryTab(QWidget):
         layout.addLayout(search_row)
 
         tag_row = QHBoxLayout()
-        tag_row.addWidget(QLabel("Tags:"))
+        tag_row.addWidget(QLabel("All tags:"))
 
         tag_scroll = QScrollArea()
         tag_scroll.setWidgetResizable(True)

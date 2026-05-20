@@ -31,7 +31,7 @@ def run_ui() -> None:
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     window = MainWindow(conn, DB_PATH)
-    window.show()
+    window.showMaximized()
     sys.exit(app.exec())
 
 

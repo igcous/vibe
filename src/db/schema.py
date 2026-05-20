@@ -40,7 +40,8 @@ def _create_tables(conn: sqlite3.Connection) -> None:
             to_track   TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
             rating     INTEGER CHECK (rating BETWEEN 1 AND 3),
             notes      TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(from_track, to_track)
         );
     """)
     conn.commit()
