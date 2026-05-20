@@ -162,20 +162,40 @@ if (typeof ForceGraph === 'undefined') {
       const isHoveredEdge = hid && (sid === hid || tid === hid);
       const active = isFocusedEdge || isHoveredEdge;
 
+      const dir = link.direction || 'none';
+      const isRated = dir !== 'none';
+
       const opacity = active
         ? Math.min(0.9, link.score * 0.7 + 0.2)
-        : (focusedNode ? 0 : (currentZoom > 2 ? 0.12 : 0));
+        : isRated
+          ? 0.65
+          : (focusedNode ? 0 : (currentZoom > 2 ? 0.12 : 0));
       if (opacity <= 0.01) return;
+
+      const edgeColor = isRated ? EDGE_COLORS.user : (EDGE_COLORS[link.dominant] || '#45475a');
+      const lineWidth = active
+        ? (isRated ? Math.max(2.5, link.score * 7) : Math.max(1, link.score * 5))
+        : (isRated ? 1.8 : 0.8);
 
       ctx.save();
       ctx.globalAlpha = opacity;
-      ctx.strokeStyle = EDGE_COLORS[link.dominant] || '#45475a';
-      ctx.lineWidth = active ? Math.max(1, link.score * 5) : 0.8;
+      ctx.strokeStyle = edgeColor;
+      ctx.lineWidth = lineWidth;
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
       ctx.lineTo(t.x, t.y);
       ctx.stroke();
       ctx.restore();
+
+      if (isRated) {
+        const arrowSize = active ? Math.max(8, link.score * 12) : 6;
+        const tHalfW = (t.__w || 40) / 2;
+        const sHalfW = (s.__w || 40) / 2;
+        if (dir === 'forward' || dir === 'both')
+          drawArrow(ctx, s.x, s.y, t.x, t.y, tHalfW, arrowSize, edgeColor, opacity);
+        if (dir === 'backward' || dir === 'both')
+          drawArrow(ctx, t.x, t.y, s.x, s.y, sHalfW, arrowSize, edgeColor, opacity);
+      }
     })
 
     // ── Interactions ─────────────────────────────────────────────────────────
@@ -220,6 +240,28 @@ if (typeof ForceGraph === 'undefined') {
     ctx.arcTo(x,     y + h, x,     y,     r);
     ctx.arcTo(x,     y,     x + w, y,     r);
     ctx.closePath();
+  }
+
+  // ── Arrowhead helper ─────────────────────────────────────────────────────
+  function drawArrow(ctx, fromX, fromY, toX, toY, nodeHalfW, arrowSize, color, alpha) {
+    const dx = toX - fromX, dy = toY - fromY;
+    const len = Math.hypot(dx, dy);
+    if (len < 1) return;
+    const ux = dx / len, uy = dy / len;
+    const tipX = toX - ux * nodeHalfW;
+    const tipY = toY - uy * nodeHalfW;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(tipX - ux * arrowSize + uy * arrowSize * 0.45,
+               tipY - uy * arrowSize - ux * arrowSize * 0.45);
+    ctx.lineTo(tipX - ux * arrowSize - uy * arrowSize * 0.45,
+               tipY - uy * arrowSize + ux * arrowSize * 0.45);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
   }
 
   // ── Tooltip ───────────────────────────────────────────────────────────────

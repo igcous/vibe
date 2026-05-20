@@ -61,15 +61,20 @@ def build_graph_data(
     for i in range(n):
         for j in range(i + 1, n):
             a, b = tracks[i], tracks[j]
-            rating = (user_ratings.get((a["id"], b["id"]))
-                      or user_ratings.get((b["id"], a["id"])))
+            fwd = user_ratings.get((a["id"], b["id"]))
+            bwd = user_ratings.get((b["id"], a["id"]))
+            rating = fwd or bwd
+            if fwd and bwd:   direction = "both"
+            elif fwd:         direction = "forward"
+            elif bwd:         direction = "backward"
+            else:             direction = "none"
             score, dominant, components = transition_score(a, b, rating, weights, include_user_ratings, rating_scores)
             if score >= score_threshold:
-                pair_scores[(a["id"], b["id"])] = (score, dominant, components)
+                pair_scores[(a["id"], b["id"])] = (score, dominant, components, direction)
 
     # Keep top max_neighbors per node
     neighbor_scores: dict[str, list] = defaultdict(list)
-    for (a_id, b_id), (score, dominant, components) in pair_scores.items():
+    for (a_id, b_id), (score, dominant, components, _dir) in pair_scores.items():
         neighbor_scores[a_id].append((score, b_id, dominant, components))
         neighbor_scores[b_id].append((score, a_id, dominant, components))
 
@@ -81,13 +86,14 @@ def build_graph_data(
 
     edges = []
     for (a_id, b_id) in kept:
-        score, dominant, components = pair_scores[(a_id, b_id)]
+        score, dominant, components, direction = pair_scores[(a_id, b_id)]
         edges.append({
             "source": a_id,
             "target": b_id,
             "score": round(score, 3),
             "dominant": dominant,
             "scores": {k: round(v, 2) for k, v in components.items()},
+            "direction": direction,
         })
 
     return {"nodes": nodes, "edges": edges}

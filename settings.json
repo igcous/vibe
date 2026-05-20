@@ -2,9 +2,9 @@
   "scan_folder": "/home/igcous/Current/vibe/tracks",
   "include_user_ratings": true,
   "graph_weights": {
-    "key": 0.7,
-    "bpm": 0.0,
-    "tags": 0.0
+    "key": 0.6,
+    "bpm": 0.1,
+    "tags": 0.3
   },
   "rating_scores": {
     "1": 0.0,

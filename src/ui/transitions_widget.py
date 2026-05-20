@@ -1,7 +1,7 @@
 import sqlite3
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QComboBox, QSpinBox, QTextEdit, QPushButton,
+    QComboBox, QSpinBox, QTextEdit, QPushButton, QCheckBox,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QLabel, QSplitter, QMessageBox, QTabWidget,
     QListWidget, QLineEdit, QCompleter,
@@ -83,6 +83,9 @@ class TransitionsWidget(QWidget):
         self._notes.setMaximumHeight(60)
         self._notes.setPlaceholderText("Optional notes about this transition…")
         form_layout.addRow("Notes:", self._notes)
+
+        self._both_ways_cb = QCheckBox("Add in both ways")
+        form_layout.addRow("", self._both_ways_cb)
 
         save_btn = QPushButton("Save Transition")
         save_btn.clicked.connect(self._save_transition)
@@ -408,13 +411,11 @@ class TransitionsWidget(QWidget):
             QMessageBox.warning(self, "Duplicate", "A transition from this track to the selected track already exists.")
             return
 
-        add_transition(
-            self._conn,
-            from_id,
-            to_id,
-            self._rating.value(),
-            self._notes.toPlainText().strip(),
-        )
+        notes = self._notes.toPlainText().strip()
+        rating = self._rating.value()
+        add_transition(self._conn, from_id, to_id, rating, notes)
+        if self._both_ways_cb.isChecked() and not transition_exists(self._conn, to_id, from_id):
+            add_transition(self._conn, to_id, from_id, rating, notes)
         self._notes.clear()
         self._refresh_transitions_table()
         self.transitions_changed.emit()
