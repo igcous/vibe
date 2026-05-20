@@ -29,7 +29,8 @@ class TransitionsWidget(QWidget):
         self._readonly_from = readonly_from
         self._tabbed = tabbed
         self._from_id: str | None = None
-        self._track_map: dict[str, str] = {}   # id → display name
+        self._track_map: dict[str, str] = {}        # id → display name
+        self._to_display_map: dict[str, str] = {}   # display name → id
         self._build_ui()
         self._load_tracks()
 
@@ -70,9 +71,16 @@ class TransitionsWidget(QWidget):
             self._from_combo.currentIndexChanged.connect(self._on_from_changed)
             form_layout.addRow("From:", self._from_combo)
 
-        self._to_combo = QComboBox()
-        self._to_combo.setMinimumWidth(300)
-        form_layout.addRow("To:", self._to_combo)
+        self._to_search_model = QStringListModel(self)
+        self._to_search = QLineEdit()
+        self._to_search.setMinimumWidth(300)
+        self._to_search.setPlaceholderText("Search for a track…")
+        to_completer = QCompleter(self._to_search_model, self)
+        to_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        to_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        to_completer.setMaxVisibleItems(10)
+        self._to_search.setCompleter(to_completer)
+        form_layout.addRow("To:", self._to_search)
 
         self._rating = QSpinBox()
         self._rating.setRange(1, 3)
@@ -186,75 +194,25 @@ class TransitionsWidget(QWidget):
         if not self._from_id:
             return
 
+        from src.graph.builder import get_next_track_scores
+
         settings = load_settings()
         weights = settings.get("graph_weights", DEFAULT_WEIGHTS)
         include_ratings = bool(settings.get("include_user_ratings", False))
         raw_mults = settings.get("rating_scores", {})
-        rating_scores = (
-            {int(k): v for k, v in raw_mults.items()} if raw_mults else DEFAULT_RATING_SCORES
+        rating_scores = {int(k): v for k, v in raw_mults.items()} if raw_mults else DEFAULT_RATING_SCORES
+
+        results = get_next_track_scores(
+            self._conn, self._from_id, weights,
+            include_user_ratings=include_ratings,
+            rating_scores=rating_scores,
         )
 
-        current_row = self._conn.execute("""
-            SELECT t.*, GROUP_CONCAT(tg.name, ', ') AS tags
-            FROM tracks t
-            LEFT JOIN track_tags tt ON tt.track_id = t.id
-            LEFT JOIN tags tg ON tg.id = tt.tag_id
-            WHERE t.id = ?
-            GROUP BY t.id
-        """, (self._from_id,)).fetchone()
-        if not current_row:
-            return
-
-        incoming = self._conn.execute(
-            "SELECT from_track AS track_id, rating FROM transitions WHERE to_track = ?",
-            (self._from_id,)
-        ).fetchall()
-        outgoing = self._conn.execute(
-            "SELECT to_track AS track_id, rating FROM transitions WHERE from_track = ?",
-            (self._from_id,)
-        ).fetchall()
-        # Build map: track_id → (rating, factor_key); outgoing takes priority
-        rating_map: dict[str, tuple[int, str]] = {}
-        for row in incoming:
-            rating_map[row["track_id"]] = (row["rating"], "previous")
-        for row in outgoing:
-            rating_map[row["track_id"]] = (row["rating"], "rating")
-
-        candidates = self._conn.execute("""
-            SELECT t.*, GROUP_CONCAT(tg.name, ', ') AS tags
-            FROM tracks t
-            LEFT JOIN track_tags tt ON tt.track_id = t.id
-            LEFT JOIN tags tg ON tg.id = tt.tag_id
-            WHERE t.id != ? AND t.is_available = 1
-            GROUP BY t.id
-        """, (self._from_id,)).fetchall()
-
-        def parse_tags(row) -> list[str]:
-            raw = row["tags"] or ""
-            return [t.strip() for t in raw.split(",") if t.strip()]
-
-        current_dict = dict(current_row)
-        current_dict["tags"] = parse_tags(current_row)
-
-        results = []
-        for c in candidates:
-            c_dict = dict(c)
-            c_dict["tags"] = parse_tags(c)
-            entry = rating_map.get(c["id"])
-            user_rating = entry[0] if entry else None
-            score, dominant, _ = transition_score(
-                current_dict, c_dict, user_rating, weights,
-                include_user_ratings=include_ratings,
-                rating_scores=rating_scores,
-            )
-            factor = entry[1] if entry and include_ratings else dominant
-            artist = c["artist"] or ""
-            title = c["title"] or ""
+        for track, score, factor in results[:5]:
+            artist = track["artist"] or ""
+            title = track["title"] or ""
             display = f"{artist} — {title}" if artist else title
-            results.append((score, display, self._FACTOR_LABELS.get(factor, factor)))
-
-        results.sort(key=lambda x: x[0], reverse=True)
-        for score, display, factor_label in results[:5]:
+            factor_label = self._FACTOR_LABELS.get(factor, factor.capitalize())
             r = self._next_table.rowCount()
             self._next_table.insertRow(r)
             for col, val in enumerate([display, f"{score:.0%}", factor_label]):
@@ -302,24 +260,25 @@ class TransitionsWidget(QWidget):
     def _load_tracks(self) -> None:
         tracks = get_all_tracks(self._conn)
         self._track_map = {}
-
-        self._to_combo.blockSignals(True)
-        self._to_combo.clear()
+        self._to_display_map = {}
 
         if not self._readonly_from:
             self._from_combo.blockSignals(True)
             self._from_combo.clear()
 
+        to_names = []
         for t in tracks:
             artist = t["artist"] or ""
             title = t["title"] or ""
             display = f"{artist} — {title}" if artist else title
             self._track_map[t["id"]] = display
+            self._to_display_map[display] = t["id"]
+            to_names.append(display)
             if not self._readonly_from:
                 self._from_combo.addItem(display, userData=t["id"])
-            self._to_combo.addItem(display, userData=t["id"])
 
-        self._to_combo.blockSignals(False)
+        self._to_search_model.setStringList(to_names)
+
         if not self._readonly_from:
             self._from_combo.blockSignals(False)
 
@@ -399,7 +358,7 @@ class TransitionsWidget(QWidget):
 
     def _save_transition(self) -> None:
         from_id = self._from_id if self._readonly_from else self._from_combo.currentData()
-        to_id = self._to_combo.currentData()
+        to_id = self._to_display_map.get(self._to_search.text().strip())
 
         if not from_id or not to_id:
             QMessageBox.warning(self, "Missing tracks", "Select both a From and To track.")
@@ -417,6 +376,7 @@ class TransitionsWidget(QWidget):
         if self._both_ways_cb.isChecked() and not transition_exists(self._conn, to_id, from_id):
             add_transition(self._conn, to_id, from_id, rating, notes)
         self._notes.clear()
+        self._to_search.clear()
         self._refresh_transitions_table()
         self.transitions_changed.emit()
 

@@ -58,6 +58,7 @@ def build_graph_data(
 
     n = len(tracks)
     pair_scores: dict[tuple, tuple] = {}
+
     for i in range(n):
         for j in range(i + 1, n):
             a, b = tracks[i], tracks[j]
@@ -68,9 +69,9 @@ def build_graph_data(
             elif fwd:         direction = "forward"
             elif bwd:         direction = "backward"
             else:             direction = "none"
-            score, dominant, components = transition_score(a, b, rating, weights, include_user_ratings, rating_scores)
+            score, dominant, comps = transition_score(a, b, rating, weights, include_user_ratings, rating_scores)
             if score >= score_threshold:
-                pair_scores[(a["id"], b["id"])] = (score, dominant, components, direction)
+                pair_scores[(a["id"], b["id"])] = (score, dominant, comps, direction)
 
     # Keep top max_neighbors per node
     neighbor_scores: dict[str, list] = defaultdict(list)
@@ -97,3 +98,82 @@ def build_graph_data(
         })
 
     return {"nodes": nodes, "edges": edges}
+
+
+def get_next_track_scores(
+    conn: sqlite3.Connection,
+    from_track_id: str,
+    weights: dict[str, float] | None = None,
+    include_user_ratings: bool = False,
+    rating_scores: dict[int, float] | None = None,
+) -> list[tuple[dict, float, str]]:
+    """Return [(track_dict, score, factor_str), ...] sorted by score desc."""
+    weights = weights or DEFAULT_WEIGHTS
+
+    rows = conn.execute("""
+        SELECT t.id, t.title, t.artist, t.bpm, t.key_open,
+               GROUP_CONCAT(tg.name, ',') AS tag_str
+        FROM tracks t
+        LEFT JOIN track_tags tt ON tt.track_id = t.id
+        LEFT JOIN tags tg ON tg.id = tt.tag_id
+        WHERE t.is_available = 1
+        GROUP BY t.id
+    """).fetchall()
+
+    user_ratings_db = {
+        (r["from_track"], r["to_track"]): r["rating"]
+        for r in conn.execute(
+            "SELECT from_track, to_track, MAX(rating) AS rating "
+            "FROM transitions GROUP BY from_track, to_track"
+        ).fetchall()
+    }
+
+    tracks = []
+    for row in rows:
+        tags = [s.strip() for s in (row["tag_str"] or "").split(",") if s.strip()]
+        tracks.append({
+            "id": row["id"],
+            "title": row["title"] or "",
+            "artist": row["artist"] or "",
+            "bpm": row["bpm"],
+            "key_open": row["key_open"],
+            "tags": tags,
+        })
+
+    if not any(t["id"] == from_track_id for t in tracks):
+        return []
+
+    n = len(tracks)
+
+    # Build bidirectional rating map for the source track
+    incoming = {
+        r["from_track"]: (r["rating"], "previous")
+        for r in conn.execute(
+            "SELECT from_track, rating FROM transitions WHERE to_track = ?",
+            (from_track_id,)
+        ).fetchall()
+    }
+    outgoing = {
+        r["to_track"]: (r["rating"], "rating")
+        for r in conn.execute(
+            "SELECT to_track, rating FROM transitions WHERE from_track = ?",
+            (from_track_id,)
+        ).fetchall()
+    }
+    rating_map = {**incoming, **outgoing}  # outgoing takes priority
+
+    from_track = tracks[from_idx]
+    results = []
+    for t in tracks:
+        if t["id"] == from_track_id:
+            continue
+        entry = rating_map.get(t["id"])
+        user_rating = entry[0] if entry else None
+        score, dominant, _ = transition_score(
+            from_track, t, user_rating, weights, include_user_ratings, rating_scores
+        )
+        factor = entry[1] if entry and include_user_ratings else dominant
+        results.append((t, score, factor))
+
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results

@@ -103,16 +103,10 @@ class GraphTab(QWidget):
         search_row.addWidget(self._search_bar)
         outer.addLayout(search_row)
 
+        # ── Left column: graph on top, bottom panel below ────────────────────
         self._vsplit = QSplitter(Qt.Orientation.Vertical)
+        self._vsplit.addWidget(self._view)
 
-        # ── Top: graph + side panel ──────────────────────────────────────────
-        self._hsplit = QSplitter(Qt.Orientation.Horizontal)
-        self._hsplit.addWidget(self._view)
-        self._hsplit.addWidget(self._build_side_panel())
-        self._hsplit.setSizes([900, 220])
-        self._vsplit.addWidget(self._hsplit)
-
-        # ── Bottom: transitions panel (hidden until a node is clicked) ───────
         self._bottom_panel = _BottomPanel(self._conn, readonly_from=True, tabbed=True)
         self._bottom_panel.transitions_changed.connect(self.bottom_panel_transitions_changed)
 
@@ -125,7 +119,13 @@ class GraphTab(QWidget):
         self._vsplit.addWidget(self._bottom_panel)
         self._bottom_panel.hide()
 
-        outer.addWidget(self._vsplit)
+        # ── Outer: left column + side panel (full height on right) ───────────
+        self._hsplit = QSplitter(Qt.Orientation.Horizontal)
+        self._hsplit.addWidget(self._vsplit)
+        self._hsplit.addWidget(self._build_side_panel())
+        self._hsplit.setSizes([900, 220])
+
+        outer.addWidget(self._hsplit)
 
         self._load_search_tracks()
         self._view.load(QUrl.fromLocalFile(str(_HTML.resolve())))
