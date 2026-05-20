@@ -174,7 +174,7 @@ class TransitionsWidget(QWidget):
         layout.addWidget(self._next_table)
         return w
 
-    _FACTOR_LABELS = {"key": "Key", "bpm": "BPM", "tags": "Tags", "rating": "Rating"}
+    _FACTOR_LABELS = {"key": "Key", "bpm": "BPM", "tags": "Tags", "rating": "Rating", "previous": "Previous"}
 
     def _refresh_next_track(self) -> None:
         if not hasattr(self, '_next_table'):
@@ -202,11 +202,20 @@ class TransitionsWidget(QWidget):
         if not current_row:
             return
 
-        outgoing = self._conn.execute(
-            "SELECT to_track, rating FROM transitions WHERE from_track = ?",
+        incoming = self._conn.execute(
+            "SELECT from_track AS track_id, rating FROM transitions WHERE to_track = ?",
             (self._from_id,)
         ).fetchall()
-        rating_map = {row["to_track"]: row["rating"] for row in outgoing}
+        outgoing = self._conn.execute(
+            "SELECT to_track AS track_id, rating FROM transitions WHERE from_track = ?",
+            (self._from_id,)
+        ).fetchall()
+        # Build map: track_id → (rating, factor_key); outgoing takes priority
+        rating_map: dict[str, tuple[int, str]] = {}
+        for row in incoming:
+            rating_map[row["track_id"]] = (row["rating"], "previous")
+        for row in outgoing:
+            rating_map[row["track_id"]] = (row["rating"], "rating")
 
         candidates = self._conn.execute("""
             SELECT t.*, GROUP_CONCAT(tg.name, ', ') AS tags
@@ -228,13 +237,14 @@ class TransitionsWidget(QWidget):
         for c in candidates:
             c_dict = dict(c)
             c_dict["tags"] = parse_tags(c)
-            user_rating = rating_map.get(c["id"])
+            entry = rating_map.get(c["id"])
+            user_rating = entry[0] if entry else None
             score, dominant, _ = transition_score(
                 current_dict, c_dict, user_rating, weights,
                 include_user_ratings=include_ratings,
                 rating_scores=rating_scores,
             )
-            factor = dominant
+            factor = entry[1] if entry and include_ratings else dominant
             artist = c["artist"] or ""
             title = c["title"] or ""
             display = f"{artist} — {title}" if artist else title
