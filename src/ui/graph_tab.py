@@ -9,12 +9,12 @@ from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtCore import QObject, Signal, Slot, QUrl, Qt, QStringListModel, QSize, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QSplitter, QGroupBox, QDoubleSpinBox, QCheckBox,
+    QSplitter, QGroupBox, QDoubleSpinBox, QSpinBox,
     QPushButton, QLabel, QToolButton, QLineEdit, QCompleter,
 )
 
 from src.graph.builder import build_graph_data
-from src.graph.scoring import DEFAULT_WEIGHTS, DEFAULT_RATING_SCORES
+from src.graph.scoring import DEFAULT_WEIGHTS, DEFAULT_LAMBDA, DEFAULT_K
 from src.db.schema import init_db
 from src.ui.options_tab import load_settings, save_settings
 from src.ui.transitions_widget import TransitionsWidget
@@ -31,9 +31,9 @@ class _BottomPanel(TransitionsWidget):
         return QSize(0, 0)
 
 _WEIGHT_LABELS = [
-    ("key",  "Key compatibility"),
-    ("bpm",  "BPM match"),
     ("tags", "Tag similarity"),
+    ("key",  "Key compat."),
+    ("bpm",  "BPM match"),
 ]
 
 
@@ -85,8 +85,8 @@ class GraphTab(QWidget):
         self._bridge.toggle_config.connect(self._toggle_config_panel)
 
         self._weight_inputs: dict[str, QDoubleSpinBox] = {}
-        self._rating_multiplier_inputs: dict[int, QDoubleSpinBox] = {}
-        self._include_ratings_cb: QCheckBox
+        self._lambda_input: QDoubleSpinBox
+        self._k_input: QSpinBox
         self._search_track_map: dict[str, str] = {}
 
         outer = QVBoxLayout(self)
@@ -116,6 +116,8 @@ class GraphTab(QWidget):
 
         self._bottom_panel = _BottomPanel(self._conn, readonly_from=True, tabbed=True)
         self._bottom_panel.transitions_changed.connect(self.bottom_panel_transitions_changed)
+        self._bottom_panel.track_selected.connect(self._on_next_track_selected)
+        # λ and k are wired after _build_side_panel runs; default values suffice for now
 
         close_btn = QToolButton()
         close_btn.setText("✕")
@@ -134,6 +136,12 @@ class GraphTab(QWidget):
 
         outer.addWidget(self._hsplit)
 
+        # Sync inference params to bottom panel after side panel is built
+        self._bottom_panel.set_inference(
+            lam=self._lambda_input.value(),
+            k=self._k_input.value(),
+        )
+
         self._load_search_tracks()
         self._view.load(QUrl.fromLocalFile(str(_HTML.resolve())))
 
@@ -149,7 +157,7 @@ class GraphTab(QWidget):
         settings = load_settings()
         saved_weights = settings.get("graph_weights", DEFAULT_WEIGHTS)
 
-        weights_box = QGroupBox("Graph Weights")
+        weights_box = QGroupBox("Similarity Weights")
         form = QFormLayout(weights_box)
         form.setSpacing(6)
         for key, label in _WEIGHT_LABELS:
@@ -166,29 +174,25 @@ class GraphTab(QWidget):
         form.addRow("", self._weight_sum_label)
         layout.addWidget(weights_box)
 
-        self._include_ratings_cb = QCheckBox("Include user ratings")
-        self._include_ratings_cb.setChecked(
-            bool(settings.get("include_user_ratings", False))
-        )
-        self._include_ratings_cb.toggled.connect(self._on_include_ratings_toggled)
-        layout.addWidget(self._include_ratings_cb)
+        infer_box = QGroupBox("Inference")
+        infer_form = QFormLayout(infer_box)
+        infer_form.setSpacing(6)
 
-        saved_mults = settings.get("rating_scores", {})
-        _MULT_LABELS = [(1, "★"), (2, "★★"), (3, "★★★")]
-        mults_box = QGroupBox("Rating Scores")
-        mults_form = QFormLayout(mults_box)
-        mults_form.setSpacing(6)
-        for rating, label in _MULT_LABELS:
-            spin = QDoubleSpinBox()
-            spin.setRange(0.0, 1.0)
-            spin.setSingleStep(0.05)
-            spin.setDecimals(2)
-            default = DEFAULT_RATING_SCORES[rating]
-            spin.setValue(float(saved_mults.get(str(rating), default)))
-            spin.valueChanged.connect(self._on_rating_multiplier_changed)
-            mults_form.addRow(label + ":", spin)
-            self._rating_multiplier_inputs[rating] = spin
-        layout.addWidget(mults_box)
+        self._lambda_input = QDoubleSpinBox()
+        self._lambda_input.setRange(0.0, 1.0)
+        self._lambda_input.setSingleStep(0.05)
+        self._lambda_input.setDecimals(2)
+        self._lambda_input.setValue(float(settings.get("inference_lambda", DEFAULT_LAMBDA)))
+        self._lambda_input.valueChanged.connect(self._on_inference_changed)
+        infer_form.addRow("λ weight:", self._lambda_input)
+
+        self._k_input = QSpinBox()
+        self._k_input.setRange(1, 20)
+        self._k_input.setValue(int(settings.get("inference_k", DEFAULT_K)))
+        self._k_input.valueChanged.connect(self._on_inference_changed)
+        infer_form.addRow("Neighbors k:", self._k_input)
+
+        layout.addWidget(infer_box)
 
         redo_btn = QPushButton("Redo Graph")
         redo_btn.clicked.connect(self._on_redo_clicked)
@@ -207,18 +211,15 @@ class GraphTab(QWidget):
         settings["graph_weights"] = {k: round(s.value(), 2) for k, s in self._weight_inputs.items()}
         save_settings(settings)
 
-    def _on_include_ratings_toggled(self, checked: bool) -> None:
+    def _on_inference_changed(self) -> None:
         settings = load_settings()
-        settings["include_user_ratings"] = checked
+        settings["inference_lambda"] = round(self._lambda_input.value(), 2)
+        settings["inference_k"] = self._k_input.value()
         save_settings(settings)
-
-    def _on_rating_multiplier_changed(self) -> None:
-        settings = load_settings()
-        settings["rating_scores"] = {
-            str(r): round(s.value(), 2)
-            for r, s in self._rating_multiplier_inputs.items()
-        }
-        save_settings(settings)
+        self._bottom_panel.set_inference(
+            lam=self._lambda_input.value(),
+            k=self._k_input.value(),
+        )
 
     def _on_redo_clicked(self) -> None:
         if self._page_ready:
@@ -286,8 +287,6 @@ class GraphTab(QWidget):
 
     def _start_compute(self) -> None:
         weights = {k: round(s.value(), 2) for k, s in self._weight_inputs.items()} if self._weight_inputs else DEFAULT_WEIGHTS
-        include_user_ratings = self._include_ratings_cb.isChecked() if hasattr(self, '_include_ratings_cb') else False
-        rating_scores = {r: round(s.value(), 2) for r, s in self._rating_multiplier_inputs.items()} if self._rating_multiplier_inputs else DEFAULT_RATING_SCORES
         db_path = self._db_path
 
         sig = _ComputeSignal()
@@ -297,7 +296,7 @@ class GraphTab(QWidget):
         def worker() -> None:
             try:
                 conn = init_db(db_path)
-                data = build_graph_data(conn, weights, include_user_ratings=include_user_ratings, rating_scores=rating_scores)
+                data = build_graph_data(conn, weights)
                 conn.close()
                 result = json.dumps(data)
             except Exception:
@@ -329,6 +328,12 @@ class GraphTab(QWidget):
             self._vsplit.setSizes([int(total * 0.6), int(total * 0.4)])
         self._bottom_panel.set_from_track(track_id)
         self._bottom_panel.refresh()
+
+    def _on_next_track_selected(self, track_id: str) -> None:
+        if self._page_ready:
+            safe_id = track_id.replace("'", "\\'")
+            self._view.page().runJavaScript(f"window.selectNode('{safe_id}')")
+        self._on_node_clicked(track_id)
 
     def _close_bottom_panel(self) -> None:
         self._bottom_panel.hide()

@@ -1,78 +1,55 @@
 import math
 
-DEFAULT_WEIGHTS = {"key": 0.5, "bpm": 0.3, "tags": 0.2}
-DEFAULT_RATING_SCORES = {1: 0.5, 2: 0.75, 3: 1.0}
+DEFAULT_WEIGHTS = {"tags": 0.6, "key": 0.3, "bpm": 0.1}
+DEFAULT_LAMBDA = 0.3
+DEFAULT_K = 5
+
+_BPM_TAU = 5.0
 
 
-def key_score(key_a: str | None, key_b: str | None) -> float:
+def tag_similarity(tags_a: list[str], tags_b: list[str]) -> float:
+    if not tags_a and not tags_b:
+        return 0.0
+    sa, sb = set(tags_a), set(tags_b)
+    return len(sa & sb) / len(sa | sb)
+
+
+def key_similarity(key_a: str | None, key_b: str | None) -> float:
     if not key_a or not key_b:
         return 0.5
     try:
-        num_a, type_a = int(key_a[:-1]), key_a[-1]
-        num_b, type_b = int(key_b[:-1]), key_b[-1]
+        num_a = int(key_a[:-1])
+        num_b = int(key_b[:-1])
     except (ValueError, IndexError):
         return 0.5
-
-    if num_a == num_b and type_a == type_b:
-        return 1.0
-    if num_a == num_b:
-        return 0.8  # relative major/minor
-
-    dist = min(abs(num_a - num_b), 12 - abs(num_a - num_b))
-    if dist == 1 and type_a == type_b:
-        return 0.9  # Camelot-adjacent, same mode
-    if dist == 1:
-        return 0.55  # adjacent, cross-mode
-    if dist == 2 and type_a == type_b:
-        return 0.35
-    return max(0.0, 0.25 - (dist - 2) * 0.07)
+    d = min(abs(num_a - num_b), 12 - abs(num_a - num_b))
+    return math.exp(-d)
 
 
-def bpm_score(bpm_a: int | None, bpm_b: int | None) -> float:
+def bpm_similarity(bpm_a: int | None, bpm_b: int | None) -> float:
     if bpm_a is None or bpm_b is None:
         return 0.5
     diff = abs(bpm_a - bpm_b)
-    # Also check double/half tempo
     diff = min(diff, abs(bpm_a * 2 - bpm_b), abs(bpm_a - bpm_b * 2))
-    return math.exp(-(diff / 8.0) ** 1.5)
+    return math.exp(-max(0.0, diff - _BPM_TAU))
 
 
-def tag_score(tags_a: list[str], tags_b: list[str]) -> float:
-    if not tags_a and not tags_b:
-        return 0.0
-    if not tags_a or not tags_b:
-        return 0.5
-    sa, sb = set(tags_a), set(tags_b)
-    jaccard = len(sa & sb) / len(sa | sb)
-    return 0.5 + jaccard * 0.5
-
-
-def transition_score(
+def similarity(
     track_a: dict,
     track_b: dict,
-    user_rating: int | None,
-    weights: dict[str, float],
-    include_user_ratings: bool = False,
-    rating_scores: dict[int, float] | None = None,
+    weights: dict[str, float] | None = None,
 ) -> tuple[float, str, dict[str, float]]:
-    """Returns (total_score 0-1, dominant_component, raw_component_scores)."""
-    k = key_score(track_a.get("key_open"), track_b.get("key_open"))
-    b = bpm_score(track_a.get("bpm"), track_b.get("bpm"))
-    t = tag_score(track_a.get("tags", []), track_b.get("tags", []))
+    """Returns (score 0-1, dominant_component, raw_component_scores)."""
+    w = weights or DEFAULT_WEIGHTS
+    s_tag = tag_similarity(track_a.get("tags", []), track_b.get("tags", []))
+    s_key = key_similarity(track_a.get("key_open"), track_b.get("key_open"))
+    s_bpm = bpm_similarity(track_a.get("bpm"), track_b.get("bpm"))
 
-    wk = weights.get("key", DEFAULT_WEIGHTS["key"])
-    wb = weights.get("bpm", DEFAULT_WEIGHTS["bpm"])
-    wt = weights.get("tags", DEFAULT_WEIGHTS["tags"])
-
-    weighted = {"key": wk * k, "bpm": wb * b, "tags": wt * t}
-    base_score = sum(weighted.values())
+    weighted = {
+        "tags": w.get("tags", DEFAULT_WEIGHTS["tags"]) * s_tag,
+        "key":  w.get("key",  DEFAULT_WEIGHTS["key"])  * s_key,
+        "bpm":  w.get("bpm",  DEFAULT_WEIGHTS["bpm"])  * s_bpm,
+    }
+    score = sum(weighted.values())
     dominant = max(weighted, key=weighted.__getitem__)
-
-    if include_user_ratings and user_rating is not None:
-        scores = rating_scores or DEFAULT_RATING_SCORES
-        score = scores.get(user_rating, base_score)
-        dominant = "rating"
-    else:
-        score = base_score
-
-    return score, dominant, {"key": k, "bpm": b, "tags": t}
+    return score, dominant, {"tags": s_tag, "key": s_key, "bpm": s_bpm}

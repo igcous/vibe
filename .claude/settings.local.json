@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(.venv/bin/python *)",
-      "Bash(sqlite3 *)"
+      "Bash(sqlite3 *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git tag *)",
+      "Bash(git push *)"
     ]
   }
 }

@@ -14,7 +14,7 @@ from src.db.queries import (
     delete_transition, update_transition, transition_exists,
     get_track, get_track_tags, tag_track, untag_track, get_all_tag_names,
 )
-from src.graph.scoring import transition_score, DEFAULT_WEIGHTS, DEFAULT_RATING_SCORES
+from src.graph.scoring import DEFAULT_WEIGHTS, DEFAULT_LAMBDA, DEFAULT_K
 from src.ui.options_tab import load_settings
 
 TRANSITION_COLUMNS = ["Direction", "Track", "BPM", "Key", "Rating", "Notes"]
@@ -22,6 +22,7 @@ TRANSITION_COLUMNS = ["Direction", "Track", "BPM", "Key", "Rating", "Notes"]
 
 class TransitionsWidget(QWidget):
     transitions_changed = Signal()
+    track_selected = Signal(str)
 
     def __init__(self, conn: sqlite3.Connection, readonly_from: bool = False, tabbed: bool = False):
         super().__init__()
@@ -31,6 +32,8 @@ class TransitionsWidget(QWidget):
         self._from_id: str | None = None
         self._track_map: dict[str, str] = {}        # id → display name
         self._to_display_map: dict[str, str] = {}   # display name → id
+        self._lam: float = DEFAULT_LAMBDA
+        self._k: int = DEFAULT_K
         self._build_ui()
         self._load_tracks()
 
@@ -172,8 +175,8 @@ class TransitionsWidget(QWidget):
         layout = QVBoxLayout(w)
         layout.setContentsMargins(0, 0, 0, 0)
         self._next_table = QTableWidget()
-        self._next_table.setColumnCount(3)
-        self._next_table.setHorizontalHeaderLabels(["Track", "Score", "Factor"])
+        self._next_table.setColumnCount(2)
+        self._next_table.setHorizontalHeaderLabels(["Track", "Score"])
         self._next_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._next_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._next_table.setAlternatingRowColors(True)
@@ -181,11 +184,14 @@ class TransitionsWidget(QWidget):
         h = self._next_table.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         h.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        h.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._next_table.cellClicked.connect(self._on_next_track_clicked)
         layout.addWidget(self._next_table)
         return w
 
-    _FACTOR_LABELS = {"key": "Key", "bpm": "BPM", "tags": "Tags", "rating": "Rating", "previous": "Previous"}
+    def set_inference(self, lam: float, k: int) -> None:
+        self._lam = lam
+        self._k = k
+        self._refresh_next_track()
 
     def _refresh_next_track(self) -> None:
         if not hasattr(self, '_next_table'):
@@ -198,27 +204,32 @@ class TransitionsWidget(QWidget):
 
         settings = load_settings()
         weights = settings.get("graph_weights", DEFAULT_WEIGHTS)
-        include_ratings = bool(settings.get("include_user_ratings", False))
-        raw_mults = settings.get("rating_scores", {})
-        rating_scores = {int(k): v for k, v in raw_mults.items()} if raw_mults else DEFAULT_RATING_SCORES
 
         results = get_next_track_scores(
             self._conn, self._from_id, weights,
-            include_user_ratings=include_ratings,
-            rating_scores=rating_scores,
+            lam=self._lam, k=self._k,
         )
 
-        for track, score, factor in results[:5]:
+        for track, score, _factor in results[:5]:
             artist = track["artist"] or ""
             title = track["title"] or ""
             display = f"{artist} — {title}" if artist else title
-            factor_label = self._FACTOR_LABELS.get(factor, factor.capitalize())
             r = self._next_table.rowCount()
             self._next_table.insertRow(r)
-            for col, val in enumerate([display, f"{score:.0%}", factor_label]):
-                item = QTableWidgetItem(val)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-                self._next_table.setItem(r, col, item)
+
+            name_item = QTableWidgetItem(display)
+            name_item.setData(Qt.ItemDataRole.UserRole, track["id"])
+            name_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+            self._next_table.setItem(r, 0, name_item)
+
+            score_item = QTableWidgetItem(f"{score:.3f}")
+            score_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+            self._next_table.setItem(r, 1, score_item)
+
+    def _on_next_track_clicked(self, row: int, _col: int) -> None:
+        item = self._next_table.item(row, 0)
+        if item:
+            self.track_selected.emit(item.data(Qt.ItemDataRole.UserRole))
 
     def _refresh_track_info(self) -> None:
         if not hasattr(self, '_info_bpm') or not self._from_id:

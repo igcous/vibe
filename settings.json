@@ -1,21 +1,17 @@
 {
-  "include_user_ratings": true,
-  "graph_weights": {
-    "key": 0.3,
-    "bpm": 0.1,
-    "tags": 0.6
-  },
-  "rating_scores": {
-    "1": 0.6,
-    "2": 0.8,
-    "3": 1.0
-  },
   "profiles": {
     "Default": {
-      "db_path": "library.db",
-      "scan_folder": "/home/igcous/Current/vibe/tracks",
-      "auto_scan": false
-    },
+      "db_path": "/home/igcous/Current/vibe/library.db",
+      "scan_folder": "",
+      "auto_scan": false,
+      "auto_tagger": false
+    }
   },
-  "current_profile": "Default"
+  "current_profile": "Default",
+  "db_path": "/home/igcous/Current/vibe/library.db",
+  "graph_weights": {
+    "tags": 0.6,
+    "key": 0.3,
+    "bpm": 0.1
+  }
 }

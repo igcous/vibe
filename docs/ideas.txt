@@ -1,6 +1,0 @@
-Move graph weights to Graph Tab.
-Don't mix user and default score. For example, a song with rating 3 is a 1 for sure. A song with a 2 or 1 gets some additional rating.
-All that can be done in Transtions Tab can be done in Graph Tab.
-Playlist Tab: Give me a starting song a how many songs do you want.
-
-

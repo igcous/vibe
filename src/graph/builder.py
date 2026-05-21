@@ -1,19 +1,10 @@
 import sqlite3
 from collections import defaultdict
 
-from src.graph.scoring import transition_score, DEFAULT_WEIGHTS, DEFAULT_RATING_SCORES
+from src.graph.scoring import similarity, DEFAULT_WEIGHTS, DEFAULT_LAMBDA, DEFAULT_K
 
 
-def build_graph_data(
-    conn: sqlite3.Connection,
-    weights: dict[str, float] | None = None,
-    score_threshold: float = 0.5,
-    max_neighbors: int = 10,
-    include_user_ratings: bool = False,
-    rating_scores: dict[int, float] | None = None,
-) -> dict:
-    weights = weights or DEFAULT_WEIGHTS
-
+def _fetch_tracks(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute("""
         SELECT t.id, t.title, t.artist, t.bpm, t.key_open,
                GROUP_CONCAT(tg.name, ',') AS tag_str
@@ -23,15 +14,6 @@ def build_graph_data(
         WHERE t.is_available = 1
         GROUP BY t.id
     """).fetchall()
-
-    user_ratings = {
-        (r["from_track"], r["to_track"]): r["rating"]
-        for r in conn.execute(
-            "SELECT from_track, to_track, MAX(rating) AS rating "
-            "FROM transitions GROUP BY from_track, to_track"
-        ).fetchall()
-    }
-
     tracks = []
     for row in rows:
         tags = [s.strip() for s in (row["tag_str"] or "").split(",") if s.strip()]
@@ -43,6 +25,28 @@ def build_graph_data(
             "key_open": row["key_open"],
             "tags": tags,
         })
+    return tracks
+
+
+def _fetch_ratings(conn: sqlite3.Connection) -> dict[tuple, int]:
+    return {
+        (r["from_track"], r["to_track"]): r["rating"]
+        for r in conn.execute(
+            "SELECT from_track, to_track, MAX(rating) AS rating "
+            "FROM transitions GROUP BY from_track, to_track"
+        ).fetchall()
+    }
+
+
+def build_graph_data(
+    conn: sqlite3.Connection,
+    weights: dict[str, float] | None = None,
+    score_threshold: float = 0.35,
+    max_neighbors: int = 10,
+) -> dict:
+    weights = weights or DEFAULT_WEIGHTS
+    tracks = _fetch_tracks(conn)
+    user_ratings = _fetch_ratings(conn)
 
     nodes = [
         {
@@ -64,16 +68,15 @@ def build_graph_data(
             a, b = tracks[i], tracks[j]
             fwd = user_ratings.get((a["id"], b["id"]))
             bwd = user_ratings.get((b["id"], a["id"]))
-            rating = fwd or bwd
             if fwd and bwd:   direction = "both"
             elif fwd:         direction = "forward"
             elif bwd:         direction = "backward"
             else:             direction = "none"
-            score, dominant, comps = transition_score(a, b, rating, weights, include_user_ratings, rating_scores)
-            if score >= score_threshold:
+            score, dominant, comps = similarity(a, b, weights)
+            has_rating = (fwd is not None) or (bwd is not None)
+            if score >= score_threshold or has_rating:
                 pair_scores[(a["id"], b["id"])] = (score, dominant, comps, direction)
 
-    # Keep top max_neighbors per node
     neighbor_scores: dict[str, list] = defaultdict(list)
     for (a_id, b_id), (score, dominant, components, _dir) in pair_scores.items():
         neighbor_scores[a_id].append((score, b_id, dominant, components))
@@ -84,6 +87,11 @@ def build_graph_data(
         neighbors.sort(reverse=True)
         for score, other_id, _dom, _comp in neighbors[:max_neighbors]:
             kept.add((min(node_id, other_id), max(node_id, other_id)))
+
+    # Rated transitions are always shown regardless of score or neighbor count
+    for (a_id, b_id), (_score, _dom, _comps, direction) in pair_scores.items():
+        if direction != "none":
+            kept.add((min(a_id, b_id), max(a_id, b_id)))
 
     edges = []
     for (a_id, b_id) in kept:
@@ -104,75 +112,59 @@ def get_next_track_scores(
     conn: sqlite3.Connection,
     from_track_id: str,
     weights: dict[str, float] | None = None,
-    include_user_ratings: bool = False,
-    rating_scores: dict[int, float] | None = None,
+    lam: float = DEFAULT_LAMBDA,
+    k: int = DEFAULT_K,
 ) -> list[tuple[dict, float, str]]:
     """Return [(track_dict, score, factor_str), ...] sorted by score desc."""
     weights = weights or DEFAULT_WEIGHTS
+    tracks = _fetch_tracks(conn)
 
-    rows = conn.execute("""
-        SELECT t.id, t.title, t.artist, t.bpm, t.key_open,
-               GROUP_CONCAT(tg.name, ',') AS tag_str
-        FROM tracks t
-        LEFT JOIN track_tags tt ON tt.track_id = t.id
-        LEFT JOIN tags tg ON tg.id = tt.tag_id
-        WHERE t.is_available = 1
-        GROUP BY t.id
-    """).fetchall()
-
-    user_ratings_db = {
-        (r["from_track"], r["to_track"]): r["rating"]
-        for r in conn.execute(
-            "SELECT from_track, to_track, MAX(rating) AS rating "
-            "FROM transitions GROUP BY from_track, to_track"
-        ).fetchall()
-    }
-
-    tracks = []
-    for row in rows:
-        tags = [s.strip() for s in (row["tag_str"] or "").split(",") if s.strip()]
-        tracks.append({
-            "id": row["id"],
-            "title": row["title"] or "",
-            "artist": row["artist"] or "",
-            "bpm": row["bpm"],
-            "key_open": row["key_open"],
-            "tags": tags,
-        })
-
-    if not any(t["id"] == from_track_id for t in tracks):
+    from_track = next((t for t in tracks if t["id"] == from_track_id), None)
+    if from_track is None:
         return []
 
-    n = len(tracks)
+    # Normalize user ratings (1-3) to [0, 1]
+    all_ratings = _fetch_ratings(conn)
+    def t_ij(src_id: str, dst_id: str) -> float | None:
+        r = all_ratings.get((src_id, dst_id))
+        return r / 3.0 if r is not None else None
 
-    # Build bidirectional rating map for the source track
-    incoming = {
-        r["from_track"]: (r["rating"], "previous")
-        for r in conn.execute(
-            "SELECT from_track, rating FROM transitions WHERE to_track = ?",
-            (from_track_id,)
-        ).fetchall()
-    }
-    outgoing = {
-        r["to_track"]: (r["rating"], "rating")
-        for r in conn.execute(
-            "SELECT to_track, rating FROM transitions WHERE from_track = ?",
-            (from_track_id,)
-        ).fetchall()
-    }
-    rating_map = {**incoming, **outgoing}  # outgoing takes priority
+    # Similarity from source to all others
+    sim_from: dict[str, tuple[float, str]] = {}
+    for t in tracks:
+        if t["id"] == from_track_id:
+            continue
+        s, dominant, _ = similarity(from_track, t, weights)
+        sim_from[t["id"]] = (s, dominant)
 
-    from_track = tracks[from_idx]
+    # N(i) = top-k most similar to source
+    neighbors = sorted(sim_from.items(), key=lambda x: x[1][0], reverse=True)[:k]
+
     results = []
     for t in tracks:
         if t["id"] == from_track_id:
             continue
-        entry = rating_map.get(t["id"])
-        user_rating = entry[0] if entry else None
-        score, dominant, _ = transition_score(
-            from_track, t, user_rating, weights, include_user_ratings, rating_scores
-        )
-        factor = entry[1] if entry and include_user_ratings else dominant
+
+        t_direct = t_ij(from_track_id, t["id"])
+        s_ij, dominant = sim_from[t["id"]]
+
+        # Inferred transition: T̂(i,j) = Σ_{m ∈ N(i)} S(i,m) * T(m,j)
+        t_hat = 0.0
+        for nb_id, (s_im, _) in neighbors:
+            t_mj = t_ij(nb_id, t["id"])
+            if t_mj is not None:
+                t_hat += s_im * t_mj
+
+        if t_direct is not None:
+            score = min(1.0, t_direct + lam * t_hat)
+            factor = "direct"
+        elif t_hat > 0:
+            score = min(1.0, s_ij + lam * t_hat)
+            factor = "inferred"
+        else:
+            score = s_ij
+            factor = dominant
+
         results.append((t, score, factor))
 
     results.sort(key=lambda x: x[1], reverse=True)

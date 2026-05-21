@@ -27,7 +27,7 @@ def _app_data_dir() -> str:
 _DATA_DIR = _app_data_dir()
 SETTINGS_PATH = os.path.join(_DATA_DIR, "settings.json")
 
-_PROFILE_KEYS = {"scan_folder", "auto_scan"}
+_PROFILE_KEYS = {"scan_folder", "auto_scan", "auto_tagger"}
 
 
 # ── Raw config I/O ────────────────────────────────────────────────────────────
@@ -189,6 +189,12 @@ class OptionsTab(QWidget):
         self._auto_scan_cb.toggled.connect(self._on_auto_scan_toggled)
         group_layout.addWidget(self._auto_scan_cb)
 
+        self._auto_tagger_cb = QCheckBox("Auto-tagger (tag tracks by folder name)")
+        self._auto_tagger_cb.setChecked(bool(self._settings.get("auto_tagger", False)))
+        self._auto_tagger_cb.setToolTip("Assigns the immediate parent folder name as a tag to each scanned track.")
+        self._auto_tagger_cb.toggled.connect(self._on_auto_tagger_toggled)
+        group_layout.addWidget(self._auto_tagger_cb)
+
         self._scan_btn = QPushButton("Scan")
         self._scan_btn.setFixedWidth(80)
         self._scan_btn.clicked.connect(self._on_scan)
@@ -243,6 +249,9 @@ class OptionsTab(QWidget):
         self._auto_scan_cb.blockSignals(True)
         self._auto_scan_cb.setChecked(bool(self._settings.get("auto_scan", False)))
         self._auto_scan_cb.blockSignals(False)
+        self._auto_tagger_cb.blockSignals(True)
+        self._auto_tagger_cb.setChecked(bool(self._settings.get("auto_tagger", False)))
+        self._auto_tagger_cb.blockSignals(False)
 
         self._delete_btn.setEnabled(len(config.get("profiles", {})) > 1)
         self.profile_switched.emit()
@@ -283,6 +292,9 @@ class OptionsTab(QWidget):
         self._auto_scan_cb.blockSignals(True)
         self._auto_scan_cb.setChecked(False)
         self._auto_scan_cb.blockSignals(False)
+        self._auto_tagger_cb.blockSignals(True)
+        self._auto_tagger_cb.setChecked(False)
+        self._auto_tagger_cb.blockSignals(False)
 
         self._delete_btn.setEnabled(len(config["profiles"]) > 1)
         self.profile_switched.emit()
@@ -333,6 +345,9 @@ class OptionsTab(QWidget):
         self._auto_scan_cb.blockSignals(True)
         self._auto_scan_cb.setChecked(bool(self._settings.get("auto_scan", False)))
         self._auto_scan_cb.blockSignals(False)
+        self._auto_tagger_cb.blockSignals(True)
+        self._auto_tagger_cb.setChecked(bool(self._settings.get("auto_tagger", False)))
+        self._auto_tagger_cb.blockSignals(False)
 
         self._delete_btn.setEnabled(len(profiles) > 1)
         self.profile_switched.emit()
@@ -351,6 +366,10 @@ class OptionsTab(QWidget):
 
     def _on_auto_scan_toggled(self, checked: bool) -> None:
         self._settings["auto_scan"] = checked
+        save_settings(self._settings)
+
+    def _on_auto_tagger_toggled(self, checked: bool) -> None:
+        self._settings["auto_tagger"] = checked
         save_settings(self._settings)
 
     def _on_scan(self) -> None:
@@ -385,10 +404,12 @@ class OptionsTab(QWidget):
 
         db_path = self._db_path
 
+        auto_tag = bool(self._settings.get("auto_tagger", False))
+
         def run() -> None:
             try:
                 from src.audio.scanner import scan_folder
-                scan_folder(folder, db_path, progress_callback=signals.progress.emit)
+                scan_folder(folder, db_path, progress_callback=signals.progress.emit, auto_tag=auto_tag)
                 signals.finished.emit()
             except Exception as exc:
                 signals.error.emit(str(exc))
