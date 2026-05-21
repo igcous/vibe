@@ -12,15 +12,17 @@ def init_db(db_path: str) -> sqlite3.Connection:
 def _create_tables(conn: sqlite3.Connection) -> None:
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS tracks (
-            id          TEXT PRIMARY KEY,
-            path        TEXT,
-            title       TEXT,
-            artist      TEXT,
-            bpm         INTEGER,
-            key_open    TEXT,
-            key_strength REAL,
-            is_available BOOLEAN NOT NULL DEFAULT 1,
-            last_seen   TIMESTAMP
+            id               TEXT PRIMARY KEY,
+            path             TEXT,
+            title            TEXT,
+            artist           TEXT,
+            bpm              INTEGER,
+            key_open         TEXT,
+            key_strength     REAL,
+            energy           REAL,
+            spectral_centroid REAL,
+            is_available     BOOLEAN NOT NULL DEFAULT 1,
+            last_seen        TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS tags (

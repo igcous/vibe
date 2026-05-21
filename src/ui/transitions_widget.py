@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QComboBox, QSpinBox, QTextEdit, QPushButton, QCheckBox,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QLabel, QSplitter, QMessageBox, QTabWidget,
+    QGroupBox, QLabel, QSplitter, QMessageBox, QTabWidget,
     QListWidget, QLineEdit, QCompleter,
 )
 from PySide6.QtCore import Qt, Signal, QStringListModel
@@ -34,6 +34,7 @@ class TransitionsWidget(QWidget):
         self._to_display_map: dict[str, str] = {}   # display name → id
         self._lam: float = DEFAULT_LAMBDA
         self._k: int = DEFAULT_K
+        self._include_transitions: bool = True
         self._build_ui()
         self._load_tracks()
 
@@ -128,30 +129,40 @@ class TransitionsWidget(QWidget):
 
     def _build_track_info_widget(self) -> QWidget:
         w = QWidget()
-        layout = QVBoxLayout(w)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        outer = QHBoxLayout(w)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setSpacing(8)
 
-        form = QFormLayout()
-        form.setSpacing(4)
-        self._info_bpm = QLabel("—")
-        self._info_key = QLabel("—")
-        form.addRow("BPM:", self._info_bpm)
-        form.addRow("Key:", self._info_key)
-        layout.addLayout(form)
+        # ── Left: track attributes ────────────────────────────────────────────
+        info_box = QGroupBox("Info")
+        info_form = QFormLayout(info_box)
+        info_form.setSpacing(4)
+        self._info_bpm      = QLabel("—")
+        self._info_key      = QLabel("—")
+        self._info_energy   = QLabel("—")
+        self._info_centroid = QLabel("—")
+        info_form.addRow("BPM:",        self._info_bpm)
+        info_form.addRow("Key:",        self._info_key)
+        info_form.addRow("Energy:",     self._info_energy)
+        info_form.addRow("Brightness:", self._info_centroid)
+        info_vbox = QVBoxLayout()
+        info_vbox.addWidget(info_box)
+        info_vbox.addStretch()
+        outer.addLayout(info_vbox, stretch=1)
 
-        layout.addWidget(QLabel("Tags:"))
+        # ── Right: tag management ─────────────────────────────────────────────
+        tags_box = QGroupBox("Tags")
+        tags_layout = QVBoxLayout(tags_box)
+        tags_layout.setSpacing(6)
         self._tag_list = QListWidget()
         self._tag_list.currentItemChanged.connect(
             lambda cur, _: self._tag_remove_btn.setEnabled(cur is not None)
         )
-        layout.addWidget(self._tag_list)
-
+        tags_layout.addWidget(self._tag_list)
         self._tag_remove_btn = QPushButton("Remove selected")
         self._tag_remove_btn.setEnabled(False)
         self._tag_remove_btn.clicked.connect(self._on_tag_remove)
-        layout.addWidget(self._tag_remove_btn)
-
+        tags_layout.addWidget(self._tag_remove_btn)
         add_row = QHBoxLayout()
         self._tag_input = QLineEdit()
         self._tag_input.setPlaceholderText("Add tag…")
@@ -165,9 +176,9 @@ class TransitionsWidget(QWidget):
         add_btn = QPushButton("Add")
         add_btn.clicked.connect(self._on_tag_add)
         add_row.addWidget(add_btn)
-        layout.addLayout(add_row)
+        tags_layout.addLayout(add_row)
+        outer.addWidget(tags_box, stretch=1)
 
-        layout.addStretch()
         return w
 
     def _build_next_track_widget(self) -> QWidget:
@@ -188,10 +199,10 @@ class TransitionsWidget(QWidget):
         layout.addWidget(self._next_table)
         return w
 
-    def set_inference(self, lam: float, k: int) -> None:
+    def set_inference(self, lam: float, k: int, include_transitions: bool = True) -> None:
         self._lam = lam
         self._k = k
-        self._refresh_next_track()
+        self._include_transitions = include_transitions
 
     def _refresh_next_track(self) -> None:
         if not hasattr(self, '_next_table'):
@@ -208,6 +219,7 @@ class TransitionsWidget(QWidget):
         results = get_next_track_scores(
             self._conn, self._from_id, weights,
             lam=self._lam, k=self._k,
+            include_transitions=self._include_transitions,
         )
 
         for track, score, _factor in results[:5]:
@@ -238,9 +250,13 @@ class TransitionsWidget(QWidget):
         if track:
             self._info_bpm.setText(str(track["bpm"]) if track["bpm"] is not None else "—")
             self._info_key.setText(track["key_open"] or "—")
+            e = track["energy"]
+            self._info_energy.setText(f"{e:.4f}" if e is not None else "—")
+            c = track["spectral_centroid"]
+            self._info_centroid.setText(f"{c:.0f} Hz" if c is not None else "—")
         else:
-            self._info_bpm.setText("—")
-            self._info_key.setText("—")
+            for lbl in (self._info_bpm, self._info_key, self._info_energy, self._info_centroid):
+                lbl.setText("—")
         self._reload_tag_list()
 
     def _reload_tag_list(self) -> None:
@@ -294,7 +310,6 @@ class TransitionsWidget(QWidget):
             self._from_combo.blockSignals(False)
 
         self._refresh_transitions_table()
-        self._refresh_next_track()
 
     def _on_from_changed(self) -> None:
         self._refresh_transitions_table()
@@ -416,7 +431,6 @@ class TransitionsWidget(QWidget):
                 self._selected_track_label.setText(name)
             self._refresh_transitions_table()
             self._refresh_track_info()
-            self._refresh_next_track()
         else:
             idx = self._from_combo.findData(track_id)
             if idx >= 0:

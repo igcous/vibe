@@ -9,7 +9,7 @@ from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtCore import QObject, Signal, Slot, QUrl, Qt, QStringListModel, QSize, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QSplitter, QGroupBox, QDoubleSpinBox, QSpinBox,
+    QSplitter, QGroupBox, QDoubleSpinBox, QSpinBox, QCheckBox,
     QPushButton, QLabel, QToolButton, QLineEdit, QCompleter,
 )
 
@@ -31,9 +31,11 @@ class _BottomPanel(TransitionsWidget):
         return QSize(0, 0)
 
 _WEIGHT_LABELS = [
-    ("tags", "Tag similarity"),
-    ("key",  "Key compat."),
-    ("bpm",  "BPM match"),
+    ("tags",     "Tag similarity"),
+    ("key",      "Key compat."),
+    ("bpm",      "BPM match"),
+    ("energy",   "Energy match"),
+    ("centroid", "Brightness"),
 ]
 
 
@@ -87,6 +89,7 @@ class GraphTab(QWidget):
         self._weight_inputs: dict[str, QDoubleSpinBox] = {}
         self._lambda_input: QDoubleSpinBox
         self._k_input: QSpinBox
+        self._include_transitions_cb: QCheckBox
         self._search_track_map: dict[str, str] = {}
 
         outer = QVBoxLayout(self)
@@ -140,6 +143,7 @@ class GraphTab(QWidget):
         self._bottom_panel.set_inference(
             lam=self._lambda_input.value(),
             k=self._k_input.value(),
+            include_transitions=self._include_transitions_cb.isChecked(),
         )
 
         self._load_search_tracks()
@@ -178,6 +182,13 @@ class GraphTab(QWidget):
         infer_form = QFormLayout(infer_box)
         infer_form.setSpacing(6)
 
+        self._include_transitions_cb = QCheckBox("Include user transitions")
+        self._include_transitions_cb.setChecked(
+            bool(settings.get("include_transitions", True))
+        )
+        self._include_transitions_cb.toggled.connect(self._on_include_transitions_toggled)
+        infer_form.addRow(self._include_transitions_cb)
+
         self._lambda_input = QDoubleSpinBox()
         self._lambda_input.setRange(0.0, 1.0)
         self._lambda_input.setSingleStep(0.05)
@@ -191,6 +202,10 @@ class GraphTab(QWidget):
         self._k_input.setValue(int(settings.get("inference_k", DEFAULT_K)))
         self._k_input.valueChanged.connect(self._on_inference_changed)
         infer_form.addRow("Neighbors k:", self._k_input)
+
+        _transitions_on = self._include_transitions_cb.isChecked()
+        self._lambda_input.setEnabled(_transitions_on)
+        self._k_input.setEnabled(_transitions_on)
 
         layout.addWidget(infer_box)
 
@@ -219,6 +234,19 @@ class GraphTab(QWidget):
         self._bottom_panel.set_inference(
             lam=self._lambda_input.value(),
             k=self._k_input.value(),
+            include_transitions=self._include_transitions_cb.isChecked(),
+        )
+
+    def _on_include_transitions_toggled(self, checked: bool) -> None:
+        self._lambda_input.setEnabled(checked)
+        self._k_input.setEnabled(checked)
+        settings = load_settings()
+        settings["include_transitions"] = checked
+        save_settings(settings)
+        self._bottom_panel.set_inference(
+            lam=self._lambda_input.value(),
+            k=self._k_input.value(),
+            include_transitions=checked,
         )
 
     def _on_redo_clicked(self) -> None:
@@ -287,6 +315,7 @@ class GraphTab(QWidget):
 
     def _start_compute(self) -> None:
         weights = {k: round(s.value(), 2) for k, s in self._weight_inputs.items()} if self._weight_inputs else DEFAULT_WEIGHTS
+        include_transitions = self._include_transitions_cb.isChecked() if hasattr(self, '_include_transitions_cb') else True
         db_path = self._db_path
 
         sig = _ComputeSignal()
@@ -296,7 +325,7 @@ class GraphTab(QWidget):
         def worker() -> None:
             try:
                 conn = init_db(db_path)
-                data = build_graph_data(conn, weights)
+                data = build_graph_data(conn, weights, include_transitions=include_transitions)
                 conn.close()
                 result = json.dumps(data)
             except Exception:

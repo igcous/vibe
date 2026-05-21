@@ -43,10 +43,11 @@ def build_graph_data(
     weights: dict[str, float] | None = None,
     score_threshold: float = 0.35,
     max_neighbors: int = 10,
+    include_transitions: bool = True,
 ) -> dict:
     weights = weights or DEFAULT_WEIGHTS
     tracks = _fetch_tracks(conn)
-    user_ratings = _fetch_ratings(conn)
+    user_ratings = _fetch_ratings(conn) if include_transitions else {}
 
     nodes = [
         {
@@ -66,14 +67,16 @@ def build_graph_data(
     for i in range(n):
         for j in range(i + 1, n):
             a, b = tracks[i], tracks[j]
-            fwd = user_ratings.get((a["id"], b["id"]))
-            bwd = user_ratings.get((b["id"], a["id"]))
-            if fwd and bwd:   direction = "both"
-            elif fwd:         direction = "forward"
-            elif bwd:         direction = "backward"
-            else:             direction = "none"
+            direction = "none"
+            has_rating = False
+            if include_transitions:
+                fwd = user_ratings.get((a["id"], b["id"]))
+                bwd = user_ratings.get((b["id"], a["id"]))
+                if fwd and bwd:   direction = "both"
+                elif fwd:         direction = "forward"
+                elif bwd:         direction = "backward"
+                has_rating = (fwd is not None) or (bwd is not None)
             score, dominant, comps = similarity(a, b, weights)
-            has_rating = (fwd is not None) or (bwd is not None)
             if score >= score_threshold or has_rating:
                 pair_scores[(a["id"], b["id"])] = (score, dominant, comps, direction)
 
@@ -88,10 +91,11 @@ def build_graph_data(
         for score, other_id, _dom, _comp in neighbors[:max_neighbors]:
             kept.add((min(node_id, other_id), max(node_id, other_id)))
 
-    # Rated transitions are always shown regardless of score or neighbor count
-    for (a_id, b_id), (_score, _dom, _comps, direction) in pair_scores.items():
-        if direction != "none":
-            kept.add((min(a_id, b_id), max(a_id, b_id)))
+    # Rated transitions always shown — only when include_transitions
+    if include_transitions:
+        for (a_id, b_id), (_score, _dom, _comps, direction) in pair_scores.items():
+            if direction != "none":
+                kept.add((min(a_id, b_id), max(a_id, b_id)))
 
     edges = []
     for (a_id, b_id) in kept:
@@ -114,6 +118,7 @@ def get_next_track_scores(
     weights: dict[str, float] | None = None,
     lam: float = DEFAULT_LAMBDA,
     k: int = DEFAULT_K,
+    include_transitions: bool = True,
 ) -> list[tuple[dict, float, str]]:
     """Return [(track_dict, score, factor_str), ...] sorted by score desc."""
     weights = weights or DEFAULT_WEIGHTS
@@ -123,12 +128,6 @@ def get_next_track_scores(
     if from_track is None:
         return []
 
-    # Normalize user ratings (1-3) to [0, 1]
-    all_ratings = _fetch_ratings(conn)
-    def t_ij(src_id: str, dst_id: str) -> float | None:
-        r = all_ratings.get((src_id, dst_id))
-        return r / 3.0 if r is not None else None
-
     # Similarity from source to all others
     sim_from: dict[str, tuple[float, str]] = {}
     for t in tracks:
@@ -137,35 +136,49 @@ def get_next_track_scores(
         s, dominant, _ = similarity(from_track, t, weights)
         sim_from[t["id"]] = (s, dominant)
 
-    # N(i) = top-k most similar to source
-    neighbors = sorted(sim_from.items(), key=lambda x: x[1][0], reverse=True)[:k]
-
     results = []
-    for t in tracks:
-        if t["id"] == from_track_id:
-            continue
 
-        t_direct = t_ij(from_track_id, t["id"])
-        s_ij, dominant = sim_from[t["id"]]
+    if include_transitions:
+        # Normalize user ratings (1-3) to [0, 1]
+        all_ratings = _fetch_ratings(conn)
+        def t_ij(src_id: str, dst_id: str) -> float | None:
+            r = all_ratings.get((src_id, dst_id))
+            return r / 3.0 if r is not None else None
 
-        # Inferred transition: T̂(i,j) = Σ_{m ∈ N(i)} S(i,m) * T(m,j)
-        t_hat = 0.0
-        for nb_id, (s_im, _) in neighbors:
-            t_mj = t_ij(nb_id, t["id"])
-            if t_mj is not None:
-                t_hat += s_im * t_mj
+        # N(i) = top-k most similar to source
+        neighbors = sorted(sim_from.items(), key=lambda x: x[1][0], reverse=True)[:k]
 
-        if t_direct is not None:
-            score = min(1.0, t_direct + lam * t_hat)
-            factor = "direct"
-        elif t_hat > 0:
-            score = min(1.0, s_ij + lam * t_hat)
-            factor = "inferred"
-        else:
-            score = s_ij
-            factor = dominant
+        for t in tracks:
+            if t["id"] == from_track_id:
+                continue
 
-        results.append((t, score, factor))
+            t_direct = t_ij(from_track_id, t["id"])
+            s_ij, dominant = sim_from[t["id"]]
+
+            # Inferred transition: T̂(i,j) = Σ_{m ∈ N(i)} S(i,m) * T(m,j)
+            t_hat = 0.0
+            for nb_id, (s_im, _) in neighbors:
+                t_mj = t_ij(nb_id, t["id"])
+                if t_mj is not None:
+                    t_hat += s_im * t_mj
+
+            if t_direct is not None:
+                score = min(1.0, t_direct + lam * t_hat)
+                factor = "direct"
+            elif t_hat > 0:
+                score = min(1.0, s_ij + lam * t_hat)
+                factor = "inferred"
+            else:
+                score = s_ij
+                factor = dominant
+
+            results.append((t, score, factor))
+    else:
+        for t in tracks:
+            if t["id"] == from_track_id:
+                continue
+            s_ij, dominant = sim_from[t["id"]]
+            results.append((t, s_ij, dominant))
 
     results.sort(key=lambda x: x[1], reverse=True)
     return results

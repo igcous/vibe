@@ -78,7 +78,8 @@ _SCALE_ALIASES = {"maj": "major", "min": "minor"}
 
 
 def analyze_audio(path: str) -> dict:
-    result: dict = {"bpm": None, "key_open": None, "key_strength": None}
+    result: dict = {"bpm": None, "key_open": None, "key_strength": None,
+                    "energy": None, "spectral_centroid": None}
 
     if _ESSENTIA_AVAILABLE:
         try:
@@ -102,6 +103,17 @@ def analyze_audio(path: str) -> dict:
             result["key_strength"] = float(strength)
         except Exception:
             pass
+
+        try:
+            result["energy"] = float(np.sqrt(np.mean(audio ** 2)))
+        except Exception:
+            pass
+
+        try:
+            spectrum = es.Spectrum()(audio)
+            result["spectral_centroid"] = float(es.Centroid(range=_SAMPLE_RATE / 2)(spectrum))
+        except Exception:
+            pass
     else:
         try:
             y, sr = librosa.load(path, sr=_SAMPLE_RATE, duration=_ANALYSIS_DURATION, mono=True)
@@ -111,6 +123,8 @@ def analyze_audio(path: str) -> dict:
             key, scale, strength = _key_from_chroma(chroma.mean(axis=1))
             result["key_open"] = to_open_key(key, scale)
             result["key_strength"] = strength
+            result["energy"] = float(librosa.feature.rms(y=y).mean())
+            result["spectral_centroid"] = float(librosa.feature.spectral_centroid(y=y, sr=sr).mean())
         except Exception:
             pass
 

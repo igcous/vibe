@@ -5,17 +5,19 @@ from typing import Any
 
 def upsert_track(conn: sqlite3.Connection, track: dict[str, Any]) -> None:
     conn.execute("""
-        INSERT INTO tracks (id, path, title, artist, bpm, key_open, key_strength, is_available, last_seen)
-        VALUES (:id, :path, :title, :artist, :bpm, :key_open, :key_strength, 1, :last_seen)
+        INSERT INTO tracks (id, path, title, artist, bpm, key_open, key_strength, energy, spectral_centroid, is_available, last_seen)
+        VALUES (:id, :path, :title, :artist, :bpm, :key_open, :key_strength, :energy, :spectral_centroid, 1, :last_seen)
         ON CONFLICT(id) DO UPDATE SET
-            path         = excluded.path,
-            title        = excluded.title,
-            artist       = excluded.artist,
-            bpm          = excluded.bpm,
-            key_open     = excluded.key_open,
-            key_strength = excluded.key_strength,
-            is_available = 1,
-            last_seen    = excluded.last_seen
+            path              = excluded.path,
+            title             = excluded.title,
+            artist            = excluded.artist,
+            bpm               = excluded.bpm,
+            key_open          = excluded.key_open,
+            key_strength      = excluded.key_strength,
+            energy            = excluded.energy,
+            spectral_centroid = excluded.spectral_centroid,
+            is_available      = 1,
+            last_seen         = excluded.last_seen
     """, {**track, "last_seen": track.get("last_seen", datetime.now().isoformat())})
     conn.commit()
 
