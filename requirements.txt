@@ -3,4 +3,3 @@ essentia
 pyacoustid
 mutagen
 PySide6
-PySide6-WebEngine
