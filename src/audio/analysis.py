@@ -1,17 +1,39 @@
-import os as _os, sys as _sys
-_fd = _sys.stderr.fileno()
-_saved = _os.dup(_fd)
-_null = _os.open(_os.devnull, _os.O_WRONLY)
-_os.dup2(_null, _fd)
-_os.close(_null)
-import essentia.standard as es
-_os.dup2(_saved, _fd)
-_os.close(_saved)
-del _os, _sys, _fd, _saved, _null
+try:
+    import os as _os, sys as _sys
+    _fd = _sys.stderr.fileno()
+    _saved = _os.dup(_fd)
+    _null = _os.open(_os.devnull, _os.O_WRONLY)
+    _os.dup2(_null, _fd)
+    _os.close(_null)
+    import essentia.standard as es
+    _os.dup2(_saved, _fd)
+    _os.close(_saved)
+    del _os, _sys, _fd, _saved, _null
+    _ESSENTIA_AVAILABLE = True
+except Exception:
+    _ESSENTIA_AVAILABLE = False
 
+import numpy as np
+import librosa
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3NoHeaderError
 import os
+
+# Krumhansl-Schmuckler key profiles (pitch class order: C C# D D# E F F# G G# A A# B)
+_KS_MAJOR = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+_KS_MINOR = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+_CHROMA_KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def _key_from_chroma(chroma_mean: np.ndarray) -> tuple[str, str, float]:
+    best_key, best_scale, best_r = "C", "major", -2.0
+    for i, key_name in enumerate(_CHROMA_KEYS):
+        rotated = np.roll(chroma_mean, -i)
+        for profile, scale in ((_KS_MAJOR, "major"), (_KS_MINOR, "minor")):
+            r = float(np.corrcoef(rotated, profile)[0, 1])
+            if r > best_r:
+                best_r, best_key, best_scale = r, key_name, scale
+    return best_key, best_scale, (best_r + 1.0) / 2.0
 
 _ANALYSIS_DURATION = 60.0   # seconds of audio to analyse
 _SAMPLE_RATE = 44100
@@ -56,29 +78,41 @@ _SCALE_ALIASES = {"maj": "major", "min": "minor"}
 
 
 def analyze_audio(path: str) -> dict:
-    """Load audio once (truncated to _ANALYSIS_DURATION), return bpm/key/key_strength."""
     result: dict = {"bpm": None, "key_open": None, "key_strength": None}
-    try:
-        audio = es.MonoLoader(filename=path, sampleRate=_SAMPLE_RATE)()
-        max_samples = int(_ANALYSIS_DURATION * _SAMPLE_RATE)
-        if len(audio) > max_samples:
-            audio = audio[:max_samples]
-    except Exception:
-        return result
 
-    try:
-        bpm_val, *_ = es.RhythmExtractor2013(method="multifeature")(audio)
-        result["bpm"] = int(round(float(bpm_val)))
-    except Exception:
-        pass
+    if _ESSENTIA_AVAILABLE:
+        try:
+            audio = es.MonoLoader(filename=path, sampleRate=_SAMPLE_RATE)()
+            max_samples = int(_ANALYSIS_DURATION * _SAMPLE_RATE)
+            if len(audio) > max_samples:
+                audio = audio[:max_samples]
+        except Exception:
+            return result
 
-    try:
-        key, scale, strength = es.KeyExtractor()(audio)
-        scale = _SCALE_ALIASES.get(scale, scale)
-        result["key_open"] = to_open_key(key, scale)
-        result["key_strength"] = float(strength)
-    except Exception:
-        pass
+        try:
+            bpm_val, *_ = es.RhythmExtractor2013(method="multifeature")(audio)
+            result["bpm"] = int(round(float(bpm_val)))
+        except Exception:
+            pass
+
+        try:
+            key, scale, strength = es.KeyExtractor()(audio)
+            scale = _SCALE_ALIASES.get(scale, scale)
+            result["key_open"] = to_open_key(key, scale)
+            result["key_strength"] = float(strength)
+        except Exception:
+            pass
+    else:
+        try:
+            y, sr = librosa.load(path, sr=_SAMPLE_RATE, duration=_ANALYSIS_DURATION, mono=True)
+            tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+            result["bpm"] = int(round(float(tempo)))
+            chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+            key, scale, strength = _key_from_chroma(chroma.mean(axis=1))
+            result["key_open"] = to_open_key(key, scale)
+            result["key_strength"] = strength
+        except Exception:
+            pass
 
     return result
 
