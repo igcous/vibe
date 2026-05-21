@@ -1,7 +1,7 @@
 import sqlite3
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QComboBox, QSpinBox, QTextEdit, QPushButton, QCheckBox,
+    QComboBox, QButtonGroup, QTextEdit, QPushButton, QCheckBox,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QGroupBox, QLabel, QSplitter, QMessageBox, QTabWidget,
     QListWidget, QLineEdit, QCompleter,
@@ -17,7 +17,7 @@ from src.db.queries import (
 from src.graph.scoring import DEFAULT_WEIGHTS, DEFAULT_LAMBDA, DEFAULT_K
 from src.ui.options_tab import load_settings
 
-TRANSITION_COLUMNS = ["Direction", "Track", "BPM", "Key", "Rating", "Notes"]
+TRANSITION_COLUMNS = ["Direction", "Track", "Rating", "Notes"]
 
 
 class TransitionsWidget(QWidget):
@@ -49,7 +49,11 @@ class TransitionsWidget(QWidget):
         if self._tabbed:
             self._selected_track_label = QLabel()
             self._selected_track_label.setStyleSheet("font-weight: bold; padding: 2px 2px;")
-            layout.addWidget(self._selected_track_label)
+            self._header_row = QHBoxLayout()
+            self._header_row.setContentsMargins(0, 0, 0, 0)
+            self._header_row.setSpacing(4)
+            self._header_row.addWidget(self._selected_track_label, stretch=1)
+            layout.addLayout(self._header_row)
 
             self.tab_widget = QTabWidget()
             self.tab_widget.addTab(form_widget, "Add transition")
@@ -86,10 +90,17 @@ class TransitionsWidget(QWidget):
         self._to_search.setCompleter(to_completer)
         form_layout.addRow("To:", self._to_search)
 
-        self._rating = QSpinBox()
-        self._rating.setRange(1, 3)
-        self._rating.setValue(2)
-        form_layout.addRow("Rating (1–3):", self._rating)
+        self._rating_group = QButtonGroup(self)
+        self._rating_group.setExclusive(True)
+        rating_row = QHBoxLayout()
+        rating_row.setSpacing(6)
+        for val, label in [(1, "★"), (2, "★★"), (3, "★★★")]:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            rating_row.addWidget(btn, stretch=1)
+            self._rating_group.addButton(btn, val)
+        self._rating_group.button(2).setChecked(True)
+        form_layout.addRow("Rating:", rating_row)
 
         self._notes = QTextEdit()
         self._notes.setMaximumHeight(60)
@@ -118,7 +129,7 @@ class TransitionsWidget(QWidget):
         self._table.setAlternatingRowColors(True)
         self._table.verticalHeader().setVisible(False)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self._table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
         delete_action = QAction("Delete transition", self._table)
         delete_action.triggered.connect(self._delete_selected_transition)
@@ -329,19 +340,13 @@ class TransitionsWidget(QWidget):
             r = self._table.rowCount()
             self._table.insertRow(r)
             display = f"{other_artist} — {other_title}" if other_artist else other_title
-            track_row = self._conn.execute(
-                "SELECT bpm, key_open FROM tracks WHERE id = ?",
-                (row["to_track"] if direction == "→" else row["from_track"],)
-            ).fetchone()
-            bpm = str(track_row["bpm"]) if track_row and track_row["bpm"] else ""
-            key = track_row["key_open"] if track_row else ""
-            values = [direction, display, bpm, key or "", str(row["rating"]), row["notes"] or ""]
+            values = [direction, display, str(row["rating"]), row["notes"] or ""]
             for col, val in enumerate(values):
                 item = QTableWidgetItem(val)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
                 if col == 0:
                     item.setData(Qt.ItemDataRole.UserRole, row["id"])
-                if col not in (4, 5):
+                if col not in (2, 3):
                     item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
                 self._table.setItem(r, col, item)
 
@@ -352,11 +357,11 @@ class TransitionsWidget(QWidget):
 
         self._table.resizeColumnsToContents()
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self._table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self._table.blockSignals(False)
 
     def _on_transition_edited(self, row: int, col: int) -> None:
-        if col not in (4, 5):
+        if col not in (2, 3):
             return
         id_item = self._table.item(row, 0)
         if id_item is None:
@@ -365,8 +370,8 @@ class TransitionsWidget(QWidget):
         if transition_id is None:
             return
 
-        rating_item = self._table.item(row, 4)
-        notes_item = self._table.item(row, 5)
+        rating_item = self._table.item(row, 2)
+        notes_item = self._table.item(row, 3)
 
         try:
             rating = max(1, min(3, int(rating_item.text())))
@@ -397,7 +402,7 @@ class TransitionsWidget(QWidget):
             return
 
         notes = self._notes.toPlainText().strip()
-        rating = self._rating.value()
+        rating = self._rating_group.checkedId()
         add_transition(self._conn, from_id, to_id, rating, notes)
         if self._both_ways_cb.isChecked() and not transition_exists(self._conn, to_id, from_id):
             add_transition(self._conn, to_id, from_id, rating, notes)
@@ -422,6 +427,13 @@ class TransitionsWidget(QWidget):
             delete_transition(self._conn, transition_id)
             self._refresh_transitions_table()
             self.transitions_changed.emit()
+
+    def reload_connection(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def set_header_right_widget(self, widget) -> None:
+        if hasattr(self, '_header_row'):
+            self._header_row.addWidget(widget)
 
     def set_from_track(self, track_id: str) -> None:
         if self._readonly_from:

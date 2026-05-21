@@ -61,6 +61,7 @@ class MainWindow(QMainWindow):
         self._library.refresh()
         self._library._rebuild_tag_filter()
         self._list.refresh()
+        self._graph.refresh()
         self._update_status()
 
     def _on_track_selected(self, track_id: str, display_name: str) -> None:

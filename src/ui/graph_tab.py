@@ -126,7 +126,7 @@ class GraphTab(QWidget):
         close_btn.setText("✕")
         close_btn.setToolTip("Close panel")
         close_btn.clicked.connect(self._close_bottom_panel)
-        self._bottom_panel.tab_widget.setCornerWidget(close_btn, Qt.Corner.TopRightCorner)
+        self._bottom_panel.set_header_right_widget(close_btn)
 
         self._vsplit.addWidget(self._bottom_panel)
         self._bottom_panel.hide()
@@ -264,6 +264,7 @@ class GraphTab(QWidget):
     def reload_connection(self, conn: sqlite3.Connection, db_path: str) -> None:
         self._conn = conn
         self._db_path = db_path
+        self._bottom_panel.reload_connection(conn)
         self._initial_fit_done = False
         self._graph_data_received = False
         self._tab_visible = False
@@ -357,6 +358,7 @@ class GraphTab(QWidget):
             self._vsplit.setSizes([int(total * 0.6), int(total * 0.4)])
         self._bottom_panel.set_from_track(track_id)
         self._bottom_panel.refresh()
+        self._bottom_panel._refresh_next_track()
 
     def _on_next_track_selected(self, track_id: str) -> None:
         if self._page_ready:
