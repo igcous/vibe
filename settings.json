@@ -1,14 +1,21 @@
 {
-  "scan_folder": "/home/igcous/Current/vibe/tracks",
-  "include_user_ratings": false,
+  "include_user_ratings": true,
   "graph_weights": {
-    "key": 1.0,
-    "bpm": 0.0,
-    "tags": 0.0
+    "key": 0.3,
+    "bpm": 0.1,
+    "tags": 0.6
   },
   "rating_scores": {
-    "1": 0.0,
-    "2": 0.0,
+    "1": 0.6,
+    "2": 0.8,
     "3": 1.0
-  }
+  },
+  "profiles": {
+    "Default": {
+      "db_path": "library.db",
+      "scan_folder": "/home/igcous/Current/vibe/tracks",
+      "auto_scan": false
+    },
+  },
+  "current_profile": "Default"
 }

@@ -1,11 +1,12 @@
 import json
 import sqlite3
+import sys
 import threading
 from pathlib import Path
 
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtCore import QObject, Signal, Slot, QUrl, Qt, QStringListModel, QSize
+from PySide6.QtCore import QObject, Signal, Slot, QUrl, Qt, QStringListModel, QSize, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QSplitter, QGroupBox, QDoubleSpinBox, QCheckBox,
@@ -18,7 +19,10 @@ from src.db.schema import init_db
 from src.ui.options_tab import load_settings, save_settings
 from src.ui.transitions_widget import TransitionsWidget
 
-_HTML = Path(__file__).parent / "graph.html"
+if getattr(sys, "frozen", False):
+    _HTML = Path(sys._MEIPASS) / "src" / "ui" / "graph.html"
+else:
+    _HTML = Path(__file__).parent / "graph.html"
 
 
 class _BottomPanel(TransitionsWidget):
@@ -66,6 +70,9 @@ class GraphTab(QWidget):
         self._page_ready = False
         self._pending_json: str | None = None
         self._compute_sig: _ComputeSignal | None = None
+        self._tab_visible = False
+        self._graph_data_received = False
+        self._initial_fit_done = False
 
         self._view = QWebEngineView()
         self._bridge = _Bridge()
@@ -225,6 +232,21 @@ class GraphTab(QWidget):
         if self._page_ready:
             self._start_compute()
 
+    def reload_connection(self, conn: sqlite3.Connection, db_path: str) -> None:
+        self._conn = conn
+        self._db_path = db_path
+        self._initial_fit_done = False
+        self._graph_data_received = False
+        self._tab_visible = False
+        self.refresh()
+
+    def on_tab_shown(self) -> None:
+        """Called each time the Graph tab becomes visible."""
+        self._tab_visible = True
+        if not self._initial_fit_done and self._graph_data_received:
+            self._initial_fit_done = True
+            QTimer.singleShot(300, self.fit_view)
+
     def fit_view(self) -> None:
         if self._page_ready:
             self._view.page().runJavaScript("window.fitAll()")
@@ -291,6 +313,10 @@ class GraphTab(QWidget):
             self._run_js(json_str)
         else:
             self._pending_json = json_str
+        self._graph_data_received = True
+        if not self._initial_fit_done and self._tab_visible:
+            self._initial_fit_done = True
+            QTimer.singleShot(1200, self.fit_view)
         self._bottom_panel._refresh_next_track()
 
     def _run_js(self, json_str: str) -> None:

@@ -30,6 +30,7 @@ class MainWindow(QMainWindow):
         self._library.track_selected.connect(self._on_track_selected)
         self._tabs.currentChanged.connect(self._on_tab_changed)
         self._options.scan_finished.connect(self._on_scan_finished)
+        self._options.profile_switched.connect(self._on_profile_switched)
         self._graph.bottom_panel_transitions_changed.connect(self._graph.refresh)
         self._graph.bottom_panel_transitions_changed.connect(self._library.refresh)
         self._graph.bottom_panel_transitions_changed.connect(self._list.refresh)
@@ -42,6 +43,20 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(0, self._options.trigger_auto_scan)
 
+    def _on_profile_switched(self) -> None:
+        from src.ui.options_tab import get_active_db_path
+        from src.db.schema import init_db
+        self._conn.close()
+        new_db = get_active_db_path()
+        new_conn = init_db(new_db)
+        self._conn = new_conn
+        self._library.reload_connection(new_conn)
+        self._graph.reload_connection(new_conn, new_db)
+        self._list.reload_connection(new_conn)
+        self._options.reload_db_path(new_db)
+        self._update_status()
+        self._options.trigger_auto_scan()
+
     def _on_scan_finished(self) -> None:
         self._library.refresh()
         self._library._rebuild_tag_filter()
@@ -53,7 +68,7 @@ class MainWindow(QMainWindow):
 
     def _on_tab_changed(self, index: int) -> None:
         if index == 1:  # Graph
-            self._graph.fit_view()
+            self._graph.on_tab_shown()
         self._update_status()
 
     def _update_status(self) -> None:

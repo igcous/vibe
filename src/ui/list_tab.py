@@ -47,6 +47,10 @@ class ListTab(QWidget):
         self._table.addAction(delete_action)
         layout.addWidget(self._table)
 
+    def reload_connection(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+        self.refresh()
+
     def refresh(self) -> None:
         rows = get_all_transitions(self._conn, self._search.text().strip())
         self._table.setRowCount(0)

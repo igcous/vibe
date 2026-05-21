@@ -2,8 +2,10 @@ import sys
 from src.db.schema import init_db
 from src.db.queries import get_all_tracks
 from src.audio.scanner import scan_folder
+from src.ui.options_tab import _migrate_settings, get_active_db_path
 
-DB_PATH = "library.db"
+_migrate_settings()
+DB_PATH = get_active_db_path()
 
 
 def run_scan(folder: str) -> None:

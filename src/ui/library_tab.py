@@ -158,6 +158,11 @@ class LibraryTab(QWidget):
     def _on_tag_filter_changed(self, _=None) -> None:
         self.refresh()
 
+    def reload_connection(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+        self._rebuild_tag_filter()
+        self.refresh()
+
     def refresh(self) -> None:
         query = self._search.text().strip()
         selected_tags = [n for n, btn in self._tag_buttons.items() if btn.isChecked()] or None
