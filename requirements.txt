@@ -1,5 +1,4 @@
 librosa
-essentia
 pyacoustid
 mutagen
 PySide6
