@@ -1,19 +1,14 @@
-try:
-    import os as _os, sys as _sys
-    _fd = _sys.stderr.fileno()
-    _saved = _os.dup(_fd)
-    _null = _os.open(_os.devnull, _os.O_WRONLY)
-    _os.dup2(_null, _fd)
-    _os.close(_null)
-    import essentia.standard as es
-    _os.dup2(_saved, _fd)
-    _os.close(_saved)
-    del _os, _sys, _fd, _saved, _null
-    _ESSENTIA_AVAILABLE = True
-except Exception:
-    _ESSENTIA_AVAILABLE = False
+import os as _os, sys as _sys
+_fd = _sys.stderr.fileno()
+_saved = _os.dup(_fd)
+_null = _os.open(_os.devnull, _os.O_WRONLY)
+_os.dup2(_null, _fd)
+_os.close(_null)
+import essentia.standard as es
+_os.dup2(_saved, _fd)
+_os.close(_saved)
+del _os, _sys, _fd, _saved, _null
 
-import librosa
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3NoHeaderError
 import os
@@ -61,37 +56,29 @@ _SCALE_ALIASES = {"maj": "major", "min": "minor"}
 
 
 def analyze_audio(path: str) -> dict:
+    """Load audio once (truncated to _ANALYSIS_DURATION), return bpm/key/key_strength."""
     result: dict = {"bpm": None, "key_open": None, "key_strength": None}
+    try:
+        audio = es.MonoLoader(filename=path, sampleRate=_SAMPLE_RATE)()
+        max_samples = int(_ANALYSIS_DURATION * _SAMPLE_RATE)
+        if len(audio) > max_samples:
+            audio = audio[:max_samples]
+    except Exception:
+        return result
 
-    if _ESSENTIA_AVAILABLE:
-        try:
-            audio = es.MonoLoader(filename=path, sampleRate=_SAMPLE_RATE)()
-            max_samples = int(_ANALYSIS_DURATION * _SAMPLE_RATE)
-            if len(audio) > max_samples:
-                audio = audio[:max_samples]
-        except Exception:
-            return result
+    try:
+        bpm_val, *_ = es.RhythmExtractor2013(method="multifeature")(audio)
+        result["bpm"] = int(round(float(bpm_val)))
+    except Exception:
+        pass
 
-        try:
-            bpm_val, *_ = es.RhythmExtractor2013(method="multifeature")(audio)
-            result["bpm"] = int(round(float(bpm_val)))
-        except Exception:
-            pass
-
-        try:
-            key, scale, strength = es.KeyExtractor()(audio)
-            scale = _SCALE_ALIASES.get(scale, scale)
-            result["key_open"] = to_open_key(key, scale)
-            result["key_strength"] = float(strength)
-        except Exception:
-            pass
-    else:
-        try:
-            y, sr = librosa.load(path, sr=_SAMPLE_RATE, duration=_ANALYSIS_DURATION, mono=True)
-            tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-            result["bpm"] = int(round(float(tempo)))
-        except Exception:
-            pass
+    try:
+        key, scale, strength = es.KeyExtractor()(audio)
+        scale = _SCALE_ALIASES.get(scale, scale)
+        result["key_open"] = to_open_key(key, scale)
+        result["key_strength"] = float(strength)
+    except Exception:
+        pass
 
     return result
 
