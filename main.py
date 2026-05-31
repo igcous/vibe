@@ -28,10 +28,12 @@ def run_scan(folder: str) -> None:
 def run_ui() -> None:
     from PySide6.QtWidgets import QApplication
     from src.ui.main_window import MainWindow
+    from src.api.server import start_api_server
 
     conn = init_db(DB_PATH)
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    start_api_server(DB_PATH)
     window = MainWindow(conn, DB_PATH)
     window.showMaximized()
     sys.exit(app.exec())

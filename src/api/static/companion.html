@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>DJ Companion</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #1e1e1e;
+    color: #e0e0e0;
+    font-size: 15px;
+    max-width: 480px;
+    margin: 0 auto;
+    min-height: 100dvh;
+  }
+
+  /* ── Search bar ───────────────────────────────────── */
+  .search-bar {
+    padding: 12px;
+    position: sticky;
+    top: 0;
+    background: #1e1e1e;
+    border-bottom: 1px solid #333;
+    z-index: 10;
+  }
+
+  .search-bar input {
+    width: 100%;
+    background: #2d2d2d;
+    border: 1px solid #444;
+    border-radius: 8px;
+    color: #e0e0e0;
+    font-size: 16px;
+    padding: 10px 14px;
+    outline: none;
+  }
+  .search-bar input:focus { border-color: #6a9fd8; }
+
+  /* ── Track list ───────────────────────────────────── */
+  .track-row {
+    padding: 12px 16px;
+    border-bottom: 1px solid #2a2a2a;
+    cursor: pointer;
+    min-height: 52px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+  }
+  .track-row:active { background: #2d2d2d; }
+
+  .track-name { font-size: 15px; }
+  .track-meta { font-size: 12px; color: #888; }
+
+  /* ── Track screen ─────────────────────────────────── */
+  .track-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: #252525;
+    border-bottom: 1px solid #333;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  #btn-back {
+    background: none;
+    border: none;
+    color: #6a9fd8;
+    font-size: 15px;
+    cursor: pointer;
+    padding: 6px 2px;
+    white-space: nowrap;
+  }
+
+  .track-header-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: #e0e0e0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── Tabs ─────────────────────────────────────────── */
+  .tab-bar {
+    display: flex;
+    border-bottom: 1px solid #333;
+    background: #252525;
+  }
+
+  .tab-btn {
+    flex: 1;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #888;
+    font-size: 14px;
+    padding: 10px;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+  .tab-btn.active { color: #e0e0e0; border-bottom-color: #6a9fd8; }
+
+  /* ── Add tab form ─────────────────────────────────── */
+  .form-body { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+
+  .field label {
+    display: block;
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .field input[type="search"],
+  .field textarea {
+    width: 100%;
+    background: #2d2d2d;
+    border: 1px solid #444;
+    border-radius: 6px;
+    color: #e0e0e0;
+    font-size: 15px;
+    padding: 10px 12px;
+    outline: none;
+    font-family: inherit;
+  }
+  .field input[type="search"]:focus,
+  .field textarea:focus { border-color: #6a9fd8; }
+
+  .field textarea {
+    resize: none;
+    max-height: 80px;
+    line-height: 1.4;
+  }
+
+  /* dropdown */
+  .dropdown-wrap { position: relative; }
+  .dropdown-list {
+    position: absolute;
+    top: 100%;
+    left: 0; right: 0;
+    background: #2d2d2d;
+    border: 1px solid #555;
+    border-radius: 0 0 6px 6px;
+    list-style: none;
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 100;
+    margin-top: 1px;
+  }
+  .dropdown-list li {
+    padding: 10px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #3a3a3a;
+    font-size: 14px;
+  }
+  .dropdown-list li:last-child { border-bottom: none; }
+  .dropdown-list li:active { background: #3a3a3a; }
+
+  /* rating */
+  .rating-group { display: flex; gap: 6px; }
+  .rating-btn {
+    flex: 1;
+    background: #2d2d2d;
+    border: 1px solid #444;
+    border-radius: 6px;
+    color: #888;
+    font-size: 15px;
+    padding: 10px 4px;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+    min-height: 44px;
+  }
+  .rating-btn.active {
+    background: #3a5070;
+    border-color: #6a9fd8;
+    color: #f0c040;
+  }
+
+  /* checkbox row */
+  .checkbox-field label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #ccc;
+    text-transform: none;
+    letter-spacing: normal;
+    cursor: pointer;
+  }
+  .checkbox-field input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: #6a9fd8;
+  }
+
+  /* save button */
+  #btn-save {
+    background: #3a5070;
+    border: 1px solid #6a9fd8;
+    border-radius: 6px;
+    color: #e0e0e0;
+    font-size: 15px;
+    font-family: inherit;
+    padding: 12px;
+    cursor: pointer;
+    min-height: 48px;
+    transition: background 0.1s;
+  }
+  #btn-save:active { background: #4a6080; }
+
+  .msg-ok    { color: #6dbf7a; font-size: 13px; text-align: center; min-height: 18px; }
+  .msg-error { color: #e07070; font-size: 13px; text-align: center; min-height: 18px; }
+
+  /* ── Transitions tab ──────────────────────────────── */
+  .transitions-body { padding: 12px; }
+
+  .section-header {
+    font-size: 12px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 8px 0 6px;
+    border-bottom: 1px solid #333;
+    margin-bottom: 4px;
+  }
+  .section-header:not(:first-child) { margin-top: 16px; }
+
+  .transition-row {
+    display: grid;
+    grid-template-columns: 24px 1fr auto;
+    gap: 6px;
+    padding: 10px 2px;
+    border-bottom: 1px solid #2a2a2a;
+    align-items: start;
+  }
+
+  .tr-dir   { color: #6a9fd8; font-size: 16px; padding-top: 1px; }
+  .tr-name  { font-size: 14px; line-height: 1.35; }
+  .tr-rating { color: #f0c040; font-size: 13px; white-space: nowrap; }
+
+  .tr-notes {
+    grid-column: 2 / -1;
+    font-size: 12px;
+    color: #888;
+    font-style: italic;
+    margin-top: 2px;
+  }
+
+  .empty-msg { color: #666; font-size: 14px; padding: 24px 0; text-align: center; }
+</style>
+</head>
+<body>
+
+<!-- ── Screen 1: Track search ───────────────────────── -->
+<div id="screen-search">
+  <div class="search-bar">
+    <input type="search" id="track-search" placeholder="Search tracks…" autocomplete="off" autocorrect="off" spellcheck="false">
+  </div>
+  <div id="track-list"></div>
+</div>
+
+<!-- ── Screen 2: Track widget ───────────────────────── -->
+<div id="screen-track" hidden>
+  <div class="track-header">
+    <button id="btn-back">← Back</button>
+    <span class="track-header-name" id="track-name"></span>
+  </div>
+
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="add">Add</button>
+    <button class="tab-btn" data-tab="transitions">Transitions</button>
+  </div>
+
+  <!-- Add tab -->
+  <div id="tab-add" class="tab-content">
+    <div class="form-body">
+
+      <div class="field">
+        <label>To</label>
+        <div class="dropdown-wrap">
+          <input type="search" id="to-search" placeholder="Search for a track…" autocomplete="off" autocorrect="off" spellcheck="false">
+          <ul id="to-dropdown" class="dropdown-list" hidden></ul>
+          <input type="hidden" id="to-id">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Rating</label>
+        <div class="rating-group">
+          <button class="rating-btn" data-val="1">★</button>
+          <button class="rating-btn active" data-val="2">★★</button>
+          <button class="rating-btn" data-val="3">★★★</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Notes</label>
+        <textarea id="notes" placeholder="Optional notes about this transition…" rows="3"></textarea>
+      </div>
+
+      <div class="field checkbox-field">
+        <label><input type="checkbox" id="bidirectional"> Add in both ways</label>
+      </div>
+
+      <button id="btn-save">Save Transition</button>
+      <div id="save-msg"></div>
+
+    </div>
+  </div>
+
+  <!-- Transitions tab -->
+  <div id="tab-transitions" class="tab-content" hidden>
+    <div class="transitions-body" id="transitions-content"></div>
+  </div>
+</div>
+
+<script>
+  'use strict';
+
+  let selectedTrack = null;
+  let selectedRating = 2;
+
+  // ── Utilities ───────────────────────────────────────
+
+  function esc(s) {
+    return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function displayName(t) {
+    return t.artist ? `${t.artist} — ${t.title}` : (t.title || t.id || '');
+  }
+
+  function stars(n) {
+    return '★'.repeat(n) + '☆'.repeat(3 - n);
+  }
+
+  function debounce(fn, ms) {
+    let timer;
+    return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+  }
+
+  // ── Screen switching ────────────────────────────────
+
+  function showSearch() {
+    document.getElementById('screen-search').hidden = false;
+    document.getElementById('screen-track').hidden = true;
+    selectedTrack = null;
+    document.getElementById('track-search').focus();
+  }
+
+  function showTrack(track) {
+    selectedTrack = track;
+    document.getElementById('screen-search').hidden = true;
+    document.getElementById('screen-track').hidden = false;
+    document.getElementById('track-name').textContent = displayName(track);
+    resetAddForm();
+    switchTab('add');
+  }
+
+  function resetAddForm() {
+    document.getElementById('to-search').value = '';
+    document.getElementById('to-id').value = '';
+    document.getElementById('to-dropdown').hidden = true;
+    document.getElementById('notes').value = '';
+    document.getElementById('bidirectional').checked = false;
+    document.getElementById('save-msg').textContent = '';
+    setRating(2);
+  }
+
+  // ── Tab switching ───────────────────────────────────
+
+  function switchTab(name) {
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === name);
+    });
+    document.getElementById('tab-add').hidden = (name !== 'add');
+    document.getElementById('tab-transitions').hidden = (name !== 'transitions');
+    if (name === 'transitions') loadTransitions();
+  }
+
+  // ── Rating ──────────────────────────────────────────
+
+  function setRating(val) {
+    selectedRating = val;
+    document.querySelectorAll('.rating-btn').forEach(b => {
+      b.classList.toggle('active', parseInt(b.dataset.val) === val);
+    });
+  }
+
+  // ── Track list (screen 1) ───────────────────────────
+
+  async function searchTracks(q) {
+    const res = await fetch(`/tracks?q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    renderTrackList(data.tracks);
+  }
+
+  function renderTrackList(tracks) {
+    const list = document.getElementById('track-list');
+    list.innerHTML = '';
+    if (!tracks.length) {
+      list.innerHTML = '<div class="empty-msg">No tracks found</div>';
+      return;
+    }
+    tracks.forEach(t => {
+      const row = document.createElement('div');
+      row.className = 'track-row';
+      const meta = [t.bpm ? `${t.bpm} BPM` : '', t.key_open || ''].filter(Boolean).join(' · ');
+      row.innerHTML = `<div class="track-name">${esc(displayName(t))}</div>${meta ? `<div class="track-meta">${esc(meta)}</div>` : ''}`;
+      row.addEventListener('click', () => showTrack(t));
+      list.appendChild(row);
+    });
+  }
+
+  // ── To-track dropdown (screen 2) ───────────────────
+
+  async function searchToTracks(q) {
+    if (!q.trim()) { document.getElementById('to-dropdown').hidden = true; return; }
+    const res = await fetch(`/tracks?q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    renderToDropdown(data.tracks);
+  }
+
+  function renderToDropdown(tracks) {
+    const dd = document.getElementById('to-dropdown');
+    dd.innerHTML = '';
+    if (!tracks.length) { dd.hidden = true; return; }
+    tracks.forEach(t => {
+      const li = document.createElement('li');
+      li.textContent = displayName(t);
+      li.addEventListener('mousedown', e => e.preventDefault());
+      li.addEventListener('click', () => {
+        document.getElementById('to-search').value = displayName(t);
+        document.getElementById('to-id').value = t.id;
+        dd.hidden = true;
+      });
+      dd.appendChild(li);
+    });
+    dd.hidden = false;
+  }
+
+  // ── Transitions tab ─────────────────────────────────
+
+  async function loadTransitions() {
+    if (!selectedTrack) return;
+    const cont = document.getElementById('transitions-content');
+    cont.innerHTML = '<div class="empty-msg">Loading…</div>';
+    const res = await fetch(`/transitions/${encodeURIComponent(selectedTrack.id)}`);
+    const data = await res.json();
+    renderTransitions(data);
+  }
+
+  function renderTransitions(data) {
+    const cont = document.getElementById('transitions-content');
+    cont.innerHTML = '';
+
+    function renderSection(title, rows, dirSymbol) {
+      if (!rows.length) return;
+      const h = document.createElement('div');
+      h.className = 'section-header';
+      h.textContent = title;
+      cont.appendChild(h);
+      rows.forEach(r => {
+        const name = r.artist ? `${r.artist} — ${r.title}` : (r.title || r.track_id || '');
+        const row = document.createElement('div');
+        row.className = 'transition-row';
+        row.innerHTML = `
+          <span class="tr-dir">${dirSymbol}</span>
+          <span class="tr-name">${esc(name)}</span>
+          <span class="tr-rating">${stars(r.rating)}</span>
+          ${r.notes ? `<span class="tr-notes">${esc(r.notes)}</span>` : ''}
+        `;
+        cont.appendChild(row);
+      });
+    }
+
+    renderSection('Outgoing', data.outgoing, '→');
+    renderSection('Incoming', data.incoming, '←');
+
+    if (!data.outgoing.length && !data.incoming.length) {
+      cont.innerHTML = '<div class="empty-msg">No transitions yet</div>';
+    }
+  }
+
+  // ── Save transition ─────────────────────────────────
+
+  async function saveTransition() {
+    const msg = document.getElementById('save-msg');
+    const toId = document.getElementById('to-id').value;
+
+    if (!toId) {
+      msg.textContent = 'Select a To track first.';
+      msg.className = 'msg-error';
+      return;
+    }
+    if (toId === selectedTrack.id) {
+      msg.textContent = 'From and To must be different tracks.';
+      msg.className = 'msg-error';
+      return;
+    }
+
+    const notes = document.getElementById('notes').value.trim();
+    const bidir = document.getElementById('bidirectional').checked;
+
+    const post = (from, to) => fetch('/transitions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from_track: from, to_track: to, rating: selectedRating, notes }),
+    });
+
+    const r1 = await post(selectedTrack.id, toId);
+
+    if (r1.status === 409) {
+      msg.textContent = 'This transition already exists.';
+      msg.className = 'msg-error';
+      return;
+    }
+    if (!r1.ok) {
+      const err = await r1.json();
+      msg.textContent = err.error || 'Error saving transition.';
+      msg.className = 'msg-error';
+      return;
+    }
+
+    if (bidir) await post(toId, selectedTrack.id); // 409 on reverse is fine
+
+    resetAddForm();
+    msg.textContent = 'Saved!';
+    msg.className = 'msg-ok';
+    setTimeout(() => { if (msg.textContent === 'Saved!') msg.textContent = ''; }, 2000);
+    switchTab('transitions');
+  }
+
+  // ── Event wiring ────────────────────────────────────
+
+  document.getElementById('track-search').addEventListener('input',
+    debounce(e => searchTracks(e.target.value), 250));
+
+  document.getElementById('btn-back').addEventListener('click', showSearch);
+
+  document.querySelectorAll('.tab-btn').forEach(b =>
+    b.addEventListener('click', () => switchTab(b.dataset.tab)));
+
+  document.querySelectorAll('.rating-btn').forEach(b =>
+    b.addEventListener('click', () => setRating(parseInt(b.dataset.val))));
+
+  document.getElementById('to-search').addEventListener('input',
+    debounce(e => {
+      document.getElementById('to-id').value = '';
+      searchToTracks(e.target.value);
+    }, 250));
+
+  document.getElementById('to-search').addEventListener('blur', () =>
+    setTimeout(() => { document.getElementById('to-dropdown').hidden = true; }, 150));
+
+  document.getElementById('btn-save').addEventListener('click', saveTransition);
+
+  // ── Init ────────────────────────────────────────────
+  searchTracks('');
+</script>
+</body>
+</html>

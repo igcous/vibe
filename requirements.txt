@@ -2,3 +2,4 @@ librosa
 pyacoustid
 mutagen
 PySide6
+flask

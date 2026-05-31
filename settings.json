@@ -4,17 +4,11 @@
       "db_path": "/home/igcous/Current/vibe/library.db",
       "scan_folder": "/home/igcous/Music/test",
       "auto_scan": false,
-      "auto_tagger": true
-    },
-    "Test 2": {
-      "db_path": "/home/igcous/Current/vibe/test_2.db",
-      "scan_folder": "/home/igcous/Music/test",
-      "auto_scan": false,
-      "auto_tagger": true
+      "auto_tagger": false
     }
   },
-  "current_profile": "Test 2",
-  "db_path": "/home/igcous/Current/vibe/test_2.db",
+  "current_profile": "Default",
+  "db_path": "/home/igcous/Current/vibe/library.db",
   "graph_weights": {
     "tags": 0.5,
     "key": 0.3,

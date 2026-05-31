@@ -1,0 +1,75 @@
+DJ Companion — Mobile Site Tutorial
+=====================================
+
+The companion site lets you log transitions from your phone during a set,
+without touching the laptop. It runs as a local web page served by the
+desktop app over your WiFi network.
+
+
+REQUIREMENTS
+------------
+- Desktop app must be running on your laptop.
+- Phone and laptop must be on the same WiFi network.
+
+
+STEP 1 — Find your laptop's IP address
+---------------------------------------
+Open a terminal on the laptop and run:
+
+    hostname -I
+
+Use the first address listed (e.g. 192.168.0.39). This is your local IP.
+
+
+STEP 2 — Open the companion on your phone
+------------------------------------------
+In Chrome (or any mobile browser), go to:
+
+    http://<your-laptop-ip>:5000
+
+Example: http://192.168.0.39:5000
+
+You should see a searchable list of all your tracks.
+
+
+STEP 3 (optional) — Add to Home Screen
+----------------------------------------
+In Chrome on Android:
+  1. Tap the three-dot menu (⋮) in the top-right corner.
+  2. Tap "Add to Home screen".
+  3. Confirm — it will appear as an app icon on your home screen.
+
+This hides the browser chrome so it feels like a native app.
+
+
+USING THE COMPANION
+--------------------
+
+1. SEARCH FOR A TRACK
+   Type in the search box to filter your library. All tracks are shown
+   on load. Tap a track to select it as the "From" track.
+
+2. ADD A TRANSITION
+   After selecting a track, the "Add" tab opens automatically.
+
+   - To: Search and tap the track you're transitioning to.
+   - Rating: Tap ★, ★★, or ★★★ (default is ★★).
+   - Notes: Optional free-text notes about the transition.
+   - Add in both ways: Check this to also save the reverse transition
+     (To → From) at the same rating and notes.
+   - Tap "Save Transition".
+
+   After saving, the "Transitions" tab opens showing the updated list.
+
+3. VIEW TRANSITIONS FOR A TRACK
+   Tap the "Transitions" tab at any time to see all transitions for the
+   selected track, split into Outgoing (→) and Incoming (←) sections.
+
+4. GO BACK
+   Tap "← Back" to return to the track search.
+
+
+DESKTOP SYNC
+------------
+Any transition saved from the phone appears in the desktop app's
+List tab automatically within 5 seconds — no manual refresh needed.

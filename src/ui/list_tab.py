@@ -59,7 +59,8 @@ class ListTab(QWidget):
             to_display = f"{row['to_artist']} — {row['to_title']}" if row['to_artist'] else row['to_title']
             r = self._table.rowCount()
             self._table.insertRow(r)
-            for col, val in enumerate([from_display, to_display, str(row['rating'])]):
+            stars = "★" * row['rating'] + "☆" * (3 - row['rating'])
+            for col, val in enumerate([from_display, to_display, stars]):
                 item = QTableWidgetItem(val)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
                 if col == 0:

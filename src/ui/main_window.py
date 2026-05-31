@@ -43,6 +43,11 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(0, self._options.trigger_auto_scan)
 
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setInterval(5000)
+        self._refresh_timer.timeout.connect(self._list.refresh)
+        self._refresh_timer.start()
+
     def _on_profile_switched(self) -> None:
         from src.ui.options_tab import get_active_db_path
         from src.db.schema import init_db
