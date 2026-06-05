@@ -5,7 +5,13 @@
       "scan_folder": "",
       "auto_scan": false,
       "auto_tagger": false
+    },
+    "Test": {
+      "db_path": "c:\\Users\\ignac\\Desktop\\vibe\\test.db",
+      "scan_folder": "C:/Users/ignac/Music/Audioslave/(2006) Revelations",
+      "auto_scan": false
     }
   },
-  "current_profile": "Default"
+  "current_profile": "Test",
+  "db_path": "c:\\Users\\ignac\\Desktop\\vibe\\test.db"
 }

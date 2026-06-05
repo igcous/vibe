@@ -18,6 +18,7 @@ import librosa
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3NoHeaderError
 import os
+import sys
 
 # Krumhansl-Schmuckler key profiles (pitch class order: C C# D D# E F F# G G# A A# B)
 _KS_MAJOR = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
@@ -118,15 +119,17 @@ def analyze_audio(path: str) -> dict:
         try:
             y, sr = librosa.load(path, sr=_SAMPLE_RATE, duration=_ANALYSIS_DURATION, mono=True)
             tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-            result["bpm"] = int(round(float(tempo)))
+            # librosa 0.11 returns tempo as a 1-D array; float() on a non-0-d
+            # numpy array raises under numpy 2.x, so pull out the scalar.
+            result["bpm"] = int(round(float(np.atleast_1d(tempo)[0])))
             chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
             key, scale, strength = _key_from_chroma(chroma.mean(axis=1))
             result["key_open"] = to_open_key(key, scale)
             result["key_strength"] = strength
             result["energy"] = float(librosa.feature.rms(y=y).mean())
             result["spectral_centroid"] = float(librosa.feature.spectral_centroid(y=y, sr=sr).mean())
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"analysis failed for {path}: {exc}", file=sys.stderr)
 
     return result
 
