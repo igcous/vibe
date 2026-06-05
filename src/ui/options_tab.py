@@ -100,6 +100,15 @@ def get_active_db_path() -> str:
     db_path = config.get("profiles", {}).get(profile_name, {}).get("db_path", "library.db")
     if not os.path.isabs(db_path):
         db_path = os.path.join(_DATA_DIR, db_path)
+    # Self-heal a stale absolute path from another machine (e.g. a Linux path
+    # carried to Windows): if its directory can't exist here, fall back to the
+    # data dir keeping just the filename.
+    parent = os.path.dirname(db_path)
+    if parent and not os.path.isdir(parent):
+        try:
+            os.makedirs(parent, exist_ok=True)
+        except OSError:
+            db_path = os.path.join(_DATA_DIR, os.path.basename(db_path))
     return db_path
 
 

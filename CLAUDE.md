@@ -22,6 +22,27 @@ The system dependency `fpcalc` (Chromaprint) must be installed separately:
 sudo apt install libchromaprint-tools
 ```
 
+### Windows (run from source)
+
+```bat
+:: from the project root, inside the venv
+.venv\Scripts\python main.py            :: launch the UI
+.venv\Scripts\python main.py .\tracks   :: scan a folder
+pip install -r requirements.txt
+```
+
+`fpcalc.exe` is **not** a pip package and is the only hard scanning dependency —
+without it every track is silently skipped (now surfaced as an `fpcalc not found`
+error). Get it from <https://acoustid.org/chromaprint> (extract `fpcalc.exe` from
+the `chromaprint-fpcalc-*-windows-*.zip`) or `choco install chromaprint`, then
+either drop `fpcalc.exe` in the **project root** (auto-discovered by
+`src/audio/fingerprint.py`), add it to PATH, or set the `FPCALC` env var to its
+full path. Essentia is optional on every platform — `src/audio/analysis.py` falls
+back to a librosa key estimator when it is missing.
+
+`settings.json` is untracked (machine-specific paths/profiles); each machine
+generates its own on first run.
+
 ## Architecture
 
 This is a desktop DJ library app built with PySide6 + SQLite. The core idea is that **tracks are nodes and transitions are edges** in a graph of DJ decisions.

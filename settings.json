@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "Default": {
+      "db_path": "library.db",
+      "scan_folder": "",
+      "auto_scan": false,
+      "auto_tagger": false
+    }
+  },
+  "current_profile": "Default"
+}

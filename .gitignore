@@ -15,6 +15,13 @@ env/
 library.db
 *.db
 
+# User settings (machine-specific paths and profiles)
+# settings.json
+
+# fpcalc binary dropped into the project root on Windows
+fpcalc
+fpcalc.exe
+
 # Music files (personal collection, binary, large)
 tracks/
 
