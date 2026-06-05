@@ -11,6 +11,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QObject
 
+# Project root — three levels up from this file (src/ui/options_tab.py).
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
 def _app_data_dir() -> str:
     """User data directory — platform-standard when bundled, project root in dev."""
     if getattr(sys, "frozen", False):
@@ -21,7 +25,7 @@ def _app_data_dir() -> str:
         d = os.path.join(base, "dj-companion")
         os.makedirs(d, exist_ok=True)
         return d
-    return os.path.abspath(".")
+    return _PROJECT_ROOT
 
 
 _DATA_DIR = _app_data_dir()

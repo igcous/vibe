@@ -1,14 +1,13 @@
 {
   "profiles": {
     "Default": {
-      "db_path": "/home/igcous/Current/vibe/library.db",
-      "scan_folder": "/home/igcous/Music/test",
+      "db_path": "library.db",
+      "scan_folder": "",
       "auto_scan": false,
       "auto_tagger": false
     }
   },
   "current_profile": "Default",
-  "db_path": "/home/igcous/Current/vibe/library.db",
   "graph_weights": {
     "tags": 0.5,
     "key": 0.3,
