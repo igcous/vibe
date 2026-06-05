@@ -98,7 +98,7 @@ Transitions saved on the phone appear in the desktop **List** tab within ~5 seco
 
 ## How the scoring works
 
-The system has two layers, described in full in [`docs/score_rework.md`](docs/score_rework.md).
+The system has two layers:
 
 ### 1. Structured similarity *(musical prior)*
 
@@ -144,8 +144,6 @@ build.spec                   PyInstaller build configuration
 pyi_rth_fpcalc.py            Runtime hook to locate fpcalc in a bundled build
 requirements.txt
 companion_tutorial.txt       Phone-companion walkthrough
-docs/
-  score_rework.md            The similarity + transition-inference model
 src/
   audio/
     fingerprint.py           Chromaprint fingerprint  → stable track identity
